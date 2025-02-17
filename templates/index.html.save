@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>YouTube Video Downloader</title>
+        <link
+            rel="stylesheet"
+            href="{{ url_for('static', path='styles.css') }}"
+<rel="icon" type="image/x-icon" href="{ url_for('static', path='images/im2.png') }}"	    
+        />
+        
+    </head>
+    <body>
+        <div class="logo-container">
+            <img
+                src="{{ url_for('static', path='images/im2.png') }}"
+                alt="Site Logo"
+                class="site-logo"
+            />
+        </div>
+
+        <div class="container">
+            <div class="info-container">
+                <div class="input-group">
+                    <input
+                        type="text"
+                        id="videoUrl"
+                        placeholder="Enter Video URL:"
+                        onkeydown="checkEnter(event)"
+                    />
+                    <button onclick="fetchVideoInfo()">Search</button>
+                </div>
+                <div id="loading" class="loading" style="display: none">
+                    <div class="spinner"></div>
+                    Loading...
+                </div>
+                <!-- Loading message -->
+                <div id="videoInfo">
+                    <h2 id="videoTitle"></h2>
+                    <div class="resolutions">
+                        <h3>Available Resolutions:</h3>
+                        <ul id="resolutionList"></ul>
+                    </div>
+                    <div id="audioDownload" style="display: none">
+                        <!-- Initially hidden -->
+                        <h3>Download Audio:</h3>
+                        <button
+                            id="audioDownloadBtn"
+                            onclick="downloadAudio(videoTitle.textContent)"
+                        >
+                            Download Audio
+                        </button>
+                    </div>
+                    <div
+                        id="progressWrapper"
+                        class="progress-wrapper"
+                        style="display: none"
+                    >
+                        <!-- Hide by default -->
+                        <div class="progress-bar">
+                            <div
+                                id="progress"
+                                class="progress"
+                                style="width: 0%"
+                            ></div>
+                        </div>
+                        <div id="progressText" class="progress-text"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="thumbnail-container">
+                <img
+                    id="thumbnail"
+                    class="thumbnail"
+                    src=""
+                    alt="Video Thumbnail"
+                    style="display: none"
+                />
+            </div>
+        </div>
+
+        <script src="{{ url_for('static', path='script.js') }}"></script>
+    </body>
+</html>

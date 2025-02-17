@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+yt-dlp
+pathvalidate
+jinja2
+python-multipart
