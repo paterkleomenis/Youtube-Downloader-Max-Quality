@@ -70,52 +70,37 @@ function downloadVideo(resolution, title) {
   const progressBar = document.getElementById("progress");
   const progressText = document.getElementById("progressText");
   progressWrapper.style.display = "block"; // Show progress bar
+  progressText.textContent = "Starting download...";
 
-  fetch(
-    `/download?url=${encodeURIComponent(videoUrl)}&resolution=${resolution}&title=${encodeURIComponent(title)}`,
-  )
-    .then((response) => {
-      if (!response.ok) throw new Error("Network response was not ok.");
-
-      const reader = response.body.getReader();
-      const contentLength = +response.headers.get("Content-Length");
-      let receivedLength = 0;
-      let chunks = [];
-
-      return new Promise((resolve, reject) => {
-        reader
-          .read()
-          .then(function processText({ done, value }) {
-            if (done) {
-              resolve(new Blob(chunks));
-              return;
-            }
-            chunks.push(value);
-            receivedLength += value.length;
-            progressBar.style.width = `${(receivedLength / contentLength) * 100}%`;
-            progressText.textContent = `Downloading... ${((receivedLength / contentLength) * 100) | 0}%`;
-            reader.read().then(processText).catch(reject);
-          })
-          .catch(reject);
-      });
-    })
-    .then((blob) => {
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = `${title}_${resolution}p.mp4`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      progressWrapper.style.display = "none"; // Hide progress bar
+  // Request download preparation (server processes in background)
+  fetch("/prepare_download", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ 
+      url: videoUrl, 
+      resolution: resolution, 
+      title: title,
+      type: "video"
+    }),
+  })
+    .then((response) => response.json())
+    .then((data) => {
+      if (data.error) {
+        alert(data.error);
+        progressWrapper.style.display = "none";
+        return;
+      }
+      
+      // Start polling for download completion
+      pollDownloadStatus(data.download_id, title, resolution, "video");
     })
     .catch((error) => {
       console.error(error);
-      alert("Error downloading video. Please try again.");
-      progressWrapper.style.display = "none"; // Hide progress bar
+      alert("Error starting download. Please try again.");
+      progressWrapper.style.display = "none";
     });
-
-  // Start progress bar update with backend hook
-  startProgressUpdate();
 }
 
 function downloadAudio(title, format) {
@@ -124,77 +109,90 @@ function downloadAudio(title, format) {
   const progressBar = document.getElementById("progress");
   const progressText = document.getElementById("progressText");
   progressWrapper.style.display = "block"; // Show progress bar
+  progressText.textContent = "Starting download...";
 
-  fetch(
-    `/download_audio?url=${encodeURIComponent(videoUrl)}&title=${encodeURIComponent(title)}&format=${format}`,
-  )
-    .then((response) => {
-      console.log(response);
-      if (!response.ok) throw new Error("Network response was not ok.");
-
-      const reader = response.body.getReader();
-      const contentLength = +response.headers.get("Content-Length");
-      let receivedLength = 0;
-      let chunks = [];
-
-      return new Promise((resolve, reject) => {
-        reader
-          .read()
-          .then(function processText({ done, value }) {
-            if (done) {
-              resolve(new Blob(chunks));
-              return;
-            }
-            chunks.push(value);
-            receivedLength += value.length;
-            progressBar.style.width = `${(receivedLength / contentLength) * 100}%`;
-            progressText.textContent = `Downloading... ${((receivedLength / contentLength) * 100) | 0}%`;
-            reader.read().then(processText).catch(reject);
-          })
-          .catch(reject);
-      });
-    })
-    .then((blob) => {
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = `${title}.${format}`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      progressWrapper.style.display = "none"; // Hide progress bar
+  // Request download preparation (server processes in background)
+  fetch("/prepare_download", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ 
+      url: videoUrl, 
+      title: title,
+      format: format,
+      type: "audio"
+    }),
+  })
+    .then((response) => response.json())
+    .then((data) => {
+      if (data.error) {
+        alert(data.error);
+        progressWrapper.style.display = "none";
+        return;
+      }
+      
+      // Start polling for download completion
+      pollDownloadStatus(data.download_id, title, null, "audio", format);
     })
     .catch((error) => {
       console.error(error);
-      alert("Error downloading audio. Please try again.");
-      progressWrapper.style.display = "none"; // Hide progress bar
+      alert("Error starting download. Please try again.");
+      progressWrapper.style.display = "none";
     });
-
-  // Start progress bar update with backend hook
-  startProgressUpdate();
 }
 
-function startProgressUpdate() {
+function pollDownloadStatus(downloadId, title, resolution, type, format) {
   const progressBar = document.getElementById("progress");
   const progressText = document.getElementById("progressText");
+  const progressWrapper = document.getElementById("progressWrapper");
 
-  // Poll the server every second for progress updates
   const interval = setInterval(() => {
-    fetch("/progress")
+    fetch(`/download_status/${downloadId}`)
       .then((response) => response.json())
       .then((data) => {
         console.log(data);
         const progress = data.progress;
         progressBar.style.width = `${progress}%`;
-        progressText.textContent = `Downloading... ${progress | 0}%`;
-        if (progress >= 100) {
-          clearInterval(interval); // Stop the polling once the download is complete
+        
+        if (data.status === "processing") {
+          progressText.textContent = `Processing... ${progress | 0}%`;
+        } else if (data.status === "ready") {
+          progressText.textContent = "Download ready! Starting...";
+          clearInterval(interval);
+          
+          // Download the prepared file directly
+          const link = document.createElement("a");
+          link.href = `/get_download/${downloadId}`;
+          
+          if (type === "video") {
+            link.download = `${title}_${resolution}p.mp4`;
+          } else {
+            link.download = `${title}.${format}`;
+          }
+          
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          progressWrapper.style.display = "none";
+        } else if (data.status === "error") {
+          clearInterval(interval);
+          alert("Error processing download: " + (data.error || "Unknown error"));
+          progressWrapper.style.display = "none";
         }
       })
       .catch((error) => {
-        console.error("Error updating progress:", error);
-        clearInterval(interval); // Stop polling on error
+        console.error("Error checking download status:", error);
+        clearInterval(interval);
+        alert("Error checking download status. Please try again.");
+        progressWrapper.style.display = "none";
       });
-  }, 1000); // Poll every second
+  }, 2000); // Poll every 2 seconds
+}
+
+function startProgressUpdate() {
+  // This function is now deprecated - keeping for backward compatibility
+  // New downloads use pollDownloadStatus instead
 }
 
 function checkEnter(event) {
