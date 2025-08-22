@@ -29,7 +29,11 @@ A FastAPI application that enables you to download both videos and audio from Yo
 3. Create and activate a virtual environment (recommended):
    ```bash
    python -m venv venv
+   ```
+   ```bash
    source venv/bin/activate   # Linux/macOS
+   ```
+   ```bash
    venv\Scripts\activate      # Windows
    ```
 4. Install dependencies:
