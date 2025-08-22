@@ -41,10 +41,6 @@ A FastAPI application that enables you to download both videos and audio from Yo
    pip install -r requirements.txt
    ```
 
-   Or individually:
-   ```bash
-   pip install fastapi uvicorn yt-dlp pathvalidate jinja2 python-multipart
-   ```
 
 ## Usage
 
