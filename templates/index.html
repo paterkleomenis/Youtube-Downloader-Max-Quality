@@ -30,17 +30,17 @@
                 id="updateButton"
                 style="
                     padding: 6px 12px;
-                    background-color: rgba(76, 175, 80, 0.9);
+                    background-color: rgba(245, 101, 101, 0.9);
                     color: white;
                     border: none;
                     border-radius: 20px;
                     cursor: pointer;
                     font-size: 12px;
-                    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+                    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
                     transition: all 0.3s ease;
                 "
-                onmouseover="this.style.backgroundColor='rgba(76, 175, 80, 1)'; this.style.transform='scale(1.05)'"
-                onmouseout="this.style.backgroundColor='rgba(76, 175, 80, 0.9)'; this.style.transform='scale(1)'"
+                onmouseover="this.style.backgroundColor='rgba(245, 101, 101, 1)'; this.style.transform='scale(1.05)'"
+                onmouseout="this.style.backgroundColor='rgba(245, 101, 101, 0.9)'; this.style.transform='scale(1)'"
             >
                 🔄 Updates
             </button>
@@ -49,12 +49,13 @@
                 style="
                     margin-top: 5px;
                     font-size: 11px;
-                    background: rgba(255, 255, 255, 0.95);
+                    background: rgba(45, 45, 45, 0.98);
                     padding: 8px;
                     border-radius: 8px;
-                    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+                    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
                     max-width: 200px;
                     display: none;
+                    color: white;
                 "
             ></div>
         </div>
@@ -144,7 +145,7 @@
                 updateButton.textContent = "⏳";
                 updateInfo.style.display = "block";
                 updateInfo.innerHTML =
-                    '<span style="color: #666;">Checking...</span>';
+                    '<span style="color: #ccc;">Checking...</span>';
 
                 try {
                     const response = await fetch("/api/check_updates");
@@ -154,20 +155,20 @@
                         updateInfo.style.display = "block";
                         updateInfo.innerHTML = `
                             <div style="color: #ff9800; font-weight: bold;">Update available!</div>
-                            <div style="font-size: 10px; color: #666; margin: 3px 0;">${data.current_version} → ${data.latest_version}</div>
-                            <button onclick="installUpdate()" style="padding: 4px 10px; background-color: #ff9800; color: white; border: none; border-radius: 12px; cursor: pointer; font-size: 11px; width: 100%;">
+                            <div style="font-size: 10px; color: #ccc; margin: 3px 0;">${data.current_version} → ${data.latest_version}</div>
+                            <button onclick="installUpdate()" style="padding: 4px 10px; background-color: #f56565; color: white; border: none; border-radius: 12px; cursor: pointer; font-size: 11px; width: 100%;">
                                 Install
                             </button>
                         `;
                     } else if (data.current_version) {
                         updateInfo.style.display = "block";
-                        updateInfo.innerHTML = `<span style="color: #4CAF50;">✅ Up to date<br><small style="color: #666;">${data.current_version}</small></span>`;
+                        updateInfo.innerHTML = `<span style="color: #4CAF50;">✅ Up to date<br><small style="color: #ccc;">${data.current_version}</small></span>`;
                         setTimeout(() => {
                             updateInfo.style.display = "none";
                         }, 3000);
                     } else {
                         updateInfo.style.display = "block";
-                        updateInfo.innerHTML = `<span style="color: #666;">Check failed</span>`;
+                        updateInfo.innerHTML = `<span style="color: #ccc;">Check failed</span>`;
                         setTimeout(() => {
                             updateInfo.style.display = "none";
                         }, 3000);
@@ -189,7 +190,7 @@
                 const updateInfo = document.getElementById("updateInfo");
                 updateInfo.style.display = "block";
                 updateInfo.innerHTML =
-                    '<span style="color: #666;">Installing...</span>';
+                    '<span style="color: #ccc;">Installing...</span>';
 
                 try {
                     const response = await fetch("/api/update_ytdlp", {
