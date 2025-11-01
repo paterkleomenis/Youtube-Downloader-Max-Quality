@@ -64,8 +64,6 @@ jobs:
           chmod +x ffmpeg_bin/ffmpeg ffmpeg_bin/ffprobe
 
       - name: Install dependencies
-</parameter>
-      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-build.txt
