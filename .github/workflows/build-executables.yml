@@ -1,0 +1,117 @@
+name: Build Executables
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: youtube-downloader-linux
+            asset_name: youtube-downloader-linux-x64
+          - os: windows-latest
+            artifact_name: youtube-downloader.exe
+            asset_name: youtube-downloader-windows-x64.exe
+          - os: macos-14
+            artifact_name: youtube-downloader
+            asset_name: youtube-downloader-macos-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-build.txt
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller youtube_downloader.spec
+
+      - name: Rename artifact (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          mv dist/youtube-downloader dist/${{ matrix.asset_name }}
+
+      - name: Rename artifact (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          move dist\youtube-downloader.exe dist\${{ matrix.asset_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: dist/${{ matrix.asset_name }}
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/${{ matrix.asset_name }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  create-installers:
+    name: Create Installers
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create archive for Linux
+        run: |
+          cd dist/youtube-downloader-linux-x64
+          chmod +x youtube-downloader-linux-x64
+          tar -czf ../youtube-downloader-linux-x64.tar.gz youtube-downloader-linux-x64
+          cd ../..
+
+      - name: Create archive for macOS
+        run: |
+          cd dist/youtube-downloader-macos-arm64
+          chmod +x youtube-downloader-macos-arm64
+          tar -czf ../youtube-downloader-macos-arm64.tar.gz youtube-downloader-macos-arm64
+          cd ../..
+
+      - name: Create archive for Windows
+        run: |
+          cd dist/youtube-downloader-windows-x64.exe
+          zip ../youtube-downloader-windows-x64.zip youtube-downloader-windows-x64.exe
+          cd ../..
+
+      - name: Upload archives
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/youtube-downloader-linux-x64.tar.gz
+            dist/youtube-downloader-macos-arm64.tar.gz
+            dist/youtube-downloader-windows-x64.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
