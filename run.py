@@ -102,6 +102,10 @@ def setup_logging():
         ],
     )
 
+    # Suppress uvicorn's access logs
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
+
 
 def main():
     """Main startup function"""
@@ -181,17 +185,22 @@ def main():
 
     # Start the server
     print("✅ Starting server...")
+    print(f"   Press CTRL+C to stop")
+    print()
     try:
-        uvicorn.run(
+        # Custom uvicorn config to suppress default messages
+        config = uvicorn.Config(
             "app:app",
             host=settings.host,
             port=port,
             reload=settings.debug,
-            log_level="info" if not settings.debug else "debug",
-            access_log=True,
+            log_level="error",
+            access_log=False,
             server_header=False,
             date_header=False,
         )
+        server = uvicorn.Server(config)
+        server.run()
     except KeyboardInterrupt:
         print("\n🛑 Server stopped by user")
     except Exception as e:
