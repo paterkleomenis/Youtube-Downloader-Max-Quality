@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 import sys
+import os
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
@@ -40,6 +41,23 @@ hiddenimports = [
 # Collect all yt-dlp extractors
 hiddenimports.extend(collect_submodules('yt_dlp.extractor'))
 
+# Create runtime hook to fix paths
+runtime_hook_content = """
+import sys
+import os
+
+# Get the path where PyInstaller extracts files
+if getattr(sys, 'frozen', False):
+    # Running as compiled executable
+    bundle_dir = sys._MEIPASS
+    # Change to the bundle directory so relative paths work
+    os.chdir(bundle_dir)
+"""
+
+# Write runtime hook file
+with open('pyi_runtime_hook.py', 'w') as f:
+    f.write(runtime_hook_content)
+
 a = Analysis(
     ['run.py'],
     pathex=[],
@@ -48,7 +66,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=['pyi_runtime_hook.py'],
     excludes=[
         'matplotlib',
         'tkinter',
