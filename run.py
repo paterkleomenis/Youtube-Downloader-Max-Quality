@@ -10,6 +10,7 @@ import subprocess
 import logging
 import socket
 from pathlib import Path
+from updater import check_updates_on_startup
 
 # Add the project directory to Python path
 project_dir = Path(__file__).parent
@@ -116,6 +117,10 @@ def main():
 
     # Setup logging
     setup_logging()
+
+    # Check for yt-dlp updates in background
+    print("🔄 Checking for updates...")
+    check_updates_on_startup()
 
     # Check dependencies
     check_dependencies()

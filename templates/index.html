@@ -24,6 +24,28 @@
             />
         </div>
 
+        <div style="text-align: center; margin: 10px 0">
+            <button
+                onclick="checkForUpdates()"
+                id="updateButton"
+                style="
+                    padding: 8px 16px;
+                    background-color: #4caf50;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-size: 14px;
+                "
+            >
+                🔄 Check for Updates
+            </button>
+            <div
+                id="updateInfo"
+                style="margin-top: 10px; font-size: 14px"
+            ></div>
+        </div>
+
         <div class="container">
             <div class="info-container">
                 <div class="input-group">
@@ -100,5 +122,62 @@
         </div>
 
         <script src="{{ url_for('static', path='script.js') }}"></script>
+        <script>
+            async function checkForUpdates() {
+                const updateButton = document.getElementById("updateButton");
+                const updateInfo = document.getElementById("updateInfo");
+
+                updateButton.disabled = true;
+                updateButton.textContent = "🔄 Checking...";
+                updateInfo.innerHTML =
+                    '<span style="color: #666;">Checking for updates...</span>';
+
+                try {
+                    const response = await fetch("/api/check_updates");
+                    const data = await response.json();
+
+                    if (data.update_available) {
+                        updateInfo.innerHTML = `
+                            <span style="color: #ff9800;">Update available: ${data.current_version} → ${data.latest_version}</span><br>
+                            <button onclick="installUpdate()" style="margin-top: 5px; padding: 6px 12px; background-color: #ff9800; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                                Install Update
+                            </button>
+                        `;
+                    } else if (data.current_version) {
+                        updateInfo.innerHTML = `<span style="color: #4CAF50;">✅ Up to date (${data.current_version})</span>`;
+                    } else {
+                        updateInfo.innerHTML = `<span style="color: #666;">Could not check for updates</span>`;
+                    }
+                } catch (error) {
+                    updateInfo.innerHTML = `<span style="color: #f44336;">Error checking updates</span>`;
+                    console.error("Update check failed:", error);
+                } finally {
+                    updateButton.disabled = false;
+                    updateButton.textContent = "🔄 Check for Updates";
+                }
+            }
+
+            async function installUpdate() {
+                const updateInfo = document.getElementById("updateInfo");
+                updateInfo.innerHTML =
+                    '<span style="color: #666;">Installing update...</span>';
+
+                try {
+                    const response = await fetch("/api/update_ytdlp", {
+                        method: "POST",
+                    });
+                    const data = await response.json();
+
+                    if (data.success) {
+                        updateInfo.innerHTML = `<span style="color: #4CAF50;">✅ ${data.message}</span>`;
+                    } else {
+                        updateInfo.innerHTML = `<span style="color: #f44336;">❌ ${data.message}</span>`;
+                    }
+                } catch (error) {
+                    updateInfo.innerHTML = `<span style="color: #f44336;">Error installing update</span>`;
+                    console.error("Update installation failed:", error);
+                }
+            }
+        </script>
     </body>
 </html>
