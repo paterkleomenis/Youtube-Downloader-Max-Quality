@@ -24,25 +24,38 @@
             />
         </div>
 
-        <div style="text-align: center; margin: 10px 0">
+        <div style="position: fixed; top: 10px; right: 10px; z-index: 1000">
             <button
                 onclick="checkForUpdates()"
                 id="updateButton"
                 style="
-                    padding: 8px 16px;
-                    background-color: #4caf50;
+                    padding: 6px 12px;
+                    background-color: rgba(76, 175, 80, 0.9);
                     color: white;
                     border: none;
-                    border-radius: 4px;
+                    border-radius: 20px;
                     cursor: pointer;
-                    font-size: 14px;
+                    font-size: 12px;
+                    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+                    transition: all 0.3s ease;
                 "
+                onmouseover="this.style.backgroundColor='rgba(76, 175, 80, 1)'; this.style.transform='scale(1.05)'"
+                onmouseout="this.style.backgroundColor='rgba(76, 175, 80, 0.9)'; this.style.transform='scale(1)'"
             >
-                🔄 Check for Updates
+                🔄 Updates
             </button>
             <div
                 id="updateInfo"
-                style="margin-top: 10px; font-size: 14px"
+                style="
+                    margin-top: 5px;
+                    font-size: 11px;
+                    background: rgba(255, 255, 255, 0.95);
+                    padding: 8px;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+                    max-width: 200px;
+                    display: none;
+                "
             ></div>
         </div>
 
@@ -128,39 +141,55 @@
                 const updateInfo = document.getElementById("updateInfo");
 
                 updateButton.disabled = true;
-                updateButton.textContent = "🔄 Checking...";
+                updateButton.textContent = "⏳";
+                updateInfo.style.display = "block";
                 updateInfo.innerHTML =
-                    '<span style="color: #666;">Checking for updates...</span>';
+                    '<span style="color: #666;">Checking...</span>';
 
                 try {
                     const response = await fetch("/api/check_updates");
                     const data = await response.json();
 
                     if (data.update_available) {
+                        updateInfo.style.display = "block";
                         updateInfo.innerHTML = `
-                            <span style="color: #ff9800;">Update available: ${data.current_version} → ${data.latest_version}</span><br>
-                            <button onclick="installUpdate()" style="margin-top: 5px; padding: 6px 12px; background-color: #ff9800; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                                Install Update
+                            <div style="color: #ff9800; font-weight: bold;">Update available!</div>
+                            <div style="font-size: 10px; color: #666; margin: 3px 0;">${data.current_version} → ${data.latest_version}</div>
+                            <button onclick="installUpdate()" style="padding: 4px 10px; background-color: #ff9800; color: white; border: none; border-radius: 12px; cursor: pointer; font-size: 11px; width: 100%;">
+                                Install
                             </button>
                         `;
                     } else if (data.current_version) {
-                        updateInfo.innerHTML = `<span style="color: #4CAF50;">✅ Up to date (${data.current_version})</span>`;
+                        updateInfo.style.display = "block";
+                        updateInfo.innerHTML = `<span style="color: #4CAF50;">✅ Up to date<br><small style="color: #666;">${data.current_version}</small></span>`;
+                        setTimeout(() => {
+                            updateInfo.style.display = "none";
+                        }, 3000);
                     } else {
-                        updateInfo.innerHTML = `<span style="color: #666;">Could not check for updates</span>`;
+                        updateInfo.style.display = "block";
+                        updateInfo.innerHTML = `<span style="color: #666;">Check failed</span>`;
+                        setTimeout(() => {
+                            updateInfo.style.display = "none";
+                        }, 3000);
                     }
                 } catch (error) {
-                    updateInfo.innerHTML = `<span style="color: #f44336;">Error checking updates</span>`;
+                    updateInfo.style.display = "block";
+                    updateInfo.innerHTML = `<span style="color: #f44336;">Error</span>`;
+                    setTimeout(() => {
+                        updateInfo.style.display = "none";
+                    }, 3000);
                     console.error("Update check failed:", error);
                 } finally {
                     updateButton.disabled = false;
-                    updateButton.textContent = "🔄 Check for Updates";
+                    updateButton.textContent = "🔄 Updates";
                 }
             }
 
             async function installUpdate() {
                 const updateInfo = document.getElementById("updateInfo");
+                updateInfo.style.display = "block";
                 updateInfo.innerHTML =
-                    '<span style="color: #666;">Installing update...</span>';
+                    '<span style="color: #666;">Installing...</span>';
 
                 try {
                     const response = await fetch("/api/update_ytdlp", {
@@ -169,12 +198,21 @@
                     const data = await response.json();
 
                     if (data.success) {
-                        updateInfo.innerHTML = `<span style="color: #4CAF50;">✅ ${data.message}</span>`;
+                        updateInfo.innerHTML = `<span style="color: #4CAF50;">✅ Updated!<br><small>${data.new_version}</small></span>`;
+                        setTimeout(() => {
+                            updateInfo.style.display = "none";
+                        }, 5000);
                     } else {
-                        updateInfo.innerHTML = `<span style="color: #f44336;">❌ ${data.message}</span>`;
+                        updateInfo.innerHTML = `<span style="color: #f44336;">❌ Failed<br><small>${data.message}</small></span>`;
+                        setTimeout(() => {
+                            updateInfo.style.display = "none";
+                        }, 5000);
                     }
                 } catch (error) {
-                    updateInfo.innerHTML = `<span style="color: #f44336;">Error installing update</span>`;
+                    updateInfo.innerHTML = `<span style="color: #f44336;">Install error</span>`;
+                    setTimeout(() => {
+                        updateInfo.style.display = "none";
+                    }, 3000);
                     console.error("Update installation failed:", error);
                 }
             }
