@@ -11,6 +11,16 @@ datas = [
     ('static', 'static'),
 ]
 
+# Add FFmpeg binaries if they exist
+import os
+if os.path.exists('ffmpeg_bin'):
+    if sys.platform == 'win32':
+        datas.append(('ffmpeg_bin/ffmpeg.exe', 'ffmpeg_bin'))
+        datas.append(('ffmpeg_bin/ffprobe.exe', 'ffmpeg_bin'))
+    else:
+        datas.append(('ffmpeg_bin/ffmpeg', 'ffmpeg_bin'))
+        datas.append(('ffmpeg_bin/ffprobe', 'ffmpeg_bin'))
+
 # Collect hidden imports for yt-dlp and other dependencies
 hiddenimports = [
     'uvicorn.logging',
@@ -52,6 +62,11 @@ if getattr(sys, 'frozen', False):
     bundle_dir = sys._MEIPASS
     # Change to the bundle directory so relative paths work
     os.chdir(bundle_dir)
+
+    # Add FFmpeg to PATH
+    ffmpeg_path = os.path.join(bundle_dir, 'ffmpeg_bin')
+    if os.path.exists(ffmpeg_path):
+        os.environ['PATH'] = ffmpeg_path + os.pathsep + os.environ.get('PATH', '')
 """
 
 # Write runtime hook file

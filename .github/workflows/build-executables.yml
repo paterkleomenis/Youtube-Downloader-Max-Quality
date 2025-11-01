@@ -35,6 +35,36 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Download FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          tar xf ffmpeg-release-amd64-static.tar.xz
+          mkdir -p ffmpeg_bin
+          cp ffmpeg-*-amd64-static/ffmpeg ffmpeg_bin/
+          cp ffmpeg-*-amd64-static/ffprobe ffmpeg_bin/
+          chmod +x ffmpeg_bin/ffmpeg ffmpeg_bin/ffprobe
+
+      - name: Download FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile "ffmpeg.zip"
+          Expand-Archive -Path ffmpeg.zip -DestinationPath .
+          mkdir ffmpeg_bin
+          copy ffmpeg-*-essentials_build\bin\ffmpeg.exe ffmpeg_bin\
+          copy ffmpeg-*-essentials_build\bin\ffprobe.exe ffmpeg_bin\
+
+      - name: Download FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          wget https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip
+          wget https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip -O ffprobe.zip
+          unzip -o zip -d ffmpeg_bin
+          unzip -o ffprobe.zip -d ffmpeg_bin
+          chmod +x ffmpeg_bin/ffmpeg ffmpeg_bin/ffprobe
+
+      - name: Install dependencies
+</parameter>
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
