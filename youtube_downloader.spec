@@ -46,6 +46,11 @@ hiddenimports = [
     'aiofiles',
     'httpx',
     'structlog',
+    # Hardening deps
+    'Cryptodome',  # pycryptodomex
+    'websockets',
+    'mutagen',
+    'brotli',
 ]
 
 # Collect all yt-dlp extractors

@@ -10,3 +10,10 @@ slowapi>=0.1.9
 structlog>=23.0.0
 aiofiles>=23.0.0
 httpx>=0.25.0
+
+# Hardening dependencies for yt-dlp future-proofing
+pycryptodomex>=3.10.0  # Encrypted streams
+websockets>=10.0.0     # Live streams / certain extractors
+mutagen>=1.45.0        # Metadata embedding
+brotli>=1.0.9          # Web compression
+certifi>=2023.0.0      # SSL certificates
