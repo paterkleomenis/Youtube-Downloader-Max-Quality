@@ -524,7 +524,12 @@ rm -- "$0"
                 f.write(sh_content)
             
             os.chmod(script_file, 0o755)
-            subprocess.Popen(["/bin/sh", str(script_file)])
+            
+            # Prepare clean environment to avoid library conflicts with PyInstaller
+            env = os.environ.copy()
+            env.pop('LD_LIBRARY_PATH', None)
+            
+            subprocess.Popen(["/bin/sh", str(script_file)], env=env)
 
         # Exit main app
         logger.info("Update started, exiting...")
