@@ -1,38 +1,37 @@
-from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import JSONResponse, FileResponse
-from fastapi.templating import Jinja2Templates
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 # Rate limiting imports - optional
 try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
-    from slowapi.util import get_remote_address
     from slowapi.errors import RateLimitExceeded
+    from slowapi.util import get_remote_address
 
     RATE_LIMITING_AVAILABLE = True
 except ImportError:
     RATE_LIMITING_AVAILABLE = False
-import os
-import logging
 import asyncio
+import logging
+import os
 import threading
 import uuid
 from typing import Optional, Union
 
 from config import settings
 from models import (
-    VideoInfoRequest,
+    DownloadPrepareResponse,
     DownloadRequest,
     DownloadStatusResponse,
-    VideoInfoResponse,
-    DownloadPrepareResponse,
     ErrorResponse,
+    VideoInfoRequest,
+    VideoInfoResponse,
 )
 from services import DownloadService, get_download_service
-from updater import get_updater, AppUpdater
+from updater import AppUpdater, get_updater
 
 # ...
-
 
 
 # ... existing endpoints ...
@@ -43,7 +42,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="YouTube Video/Audio Downloader",
     description="Download videos and audio from YouTube with progress tracking",
-    version="2.0.3",
+    version="2.0.4",
 )
 
 # Initialize rate limiter if available
@@ -370,14 +369,11 @@ async def get_versions():
         ytdlp_version = updater_instance.get_current_version()
         return {
             "app_version": app.version,
-            "ytdlp_version": ytdlp_version if ytdlp_version else "N/A"
+            "ytdlp_version": ytdlp_version if ytdlp_version else "N/A",
         }
     except Exception as e:
         logger.error(f"Error fetching versions: {e}")
-        return {
-            "app_version": app.version,
-            "ytdlp_version": "Unknown"
-        }
+        return {"app_version": app.version, "ytdlp_version": "Unknown"}
 
 
 @app.get("/api/check_updates")
@@ -415,7 +411,7 @@ async def check_app_updates():
         return {
             "update_available": available,
             "current_version": current,
-            "latest_version": latest
+            "latest_version": latest,
         }
     except Exception as e:
         logger.error(f"Error checking app updates: {e}")
