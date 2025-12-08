@@ -10,11 +10,19 @@ import subprocess
 import logging
 import socket
 from pathlib import Path
-from updater import check_updates_on_startup
+from updater import check_updates_on_startup, get_updater
 
 # Add the project directory to Python path
 project_dir = Path(__file__).parent
 sys.path.insert(0, str(project_dir))
+
+# Add custom lib directory for updates (must be before imports that use yt_dlp)
+try:
+    lib_dir = get_updater().get_lib_dir()
+    if lib_dir.exists():
+        sys.path.insert(0, str(lib_dir))
+except Exception:
+    pass
 
 try:
     import uvicorn

@@ -45,6 +45,10 @@ class YtDlpUpdater:
             cache_path = Path(base) / "youtube-downloader" / "yt-dlp"
 
         return cache_path
+    
+    def get_lib_dir(self) -> Path:
+        """Get directory where custom library updates are stored"""
+        return self.cache_dir / "lib"
 
     def _should_check_update(self) -> bool:
         """Check if we should check for updates (once per day)"""
@@ -153,44 +157,94 @@ class YtDlpUpdater:
         except Exception as e:
             logger.error(f"Error comparing versions: {e}")
             return False
+            
+    def _install_from_wheel(self, url: str) -> bool:
+        """Download and install yt-dlp from wheel"""
+        try:
+            import httpx
+            import zipfile
+            import io
+            
+            logger.info(f"Downloading yt-dlp wheel from {url}")
+            
+            response = httpx.get(url, follow_redirects=True, timeout=60.0)
+            if response.status_code != 200:
+                logger.error(f"Failed to download wheel: {response.status_code}")
+                return False
+                
+            # Extract to lib dir
+            lib_dir = self.get_lib_dir()
+            
+            # Create a temp directory for extraction
+            with tempfile.TemporaryDirectory() as temp_extract_dir:
+                with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref:
+                    zip_ref.extractall(temp_extract_dir)
+                
+                # Move yt_dlp folder to lib_dir
+                source_yt_dlp = Path(temp_extract_dir) / "yt_dlp"
+                dest_yt_dlp = lib_dir / "yt_dlp"
+                
+                if source_yt_dlp.exists():
+                    if dest_yt_dlp.exists():
+                        shutil.rmtree(dest_yt_dlp)
+                    lib_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(source_yt_dlp), str(dest_yt_dlp))
+                    
+                    # Also copy .dist-info if possible to preserve version info, 
+                    # but just the package is enough for functionality
+                    
+                    logger.info(f"Successfully installed yt-dlp to {lib_dir}")
+                    return True
+                else:
+                    logger.error("yt_dlp package not found in wheel")
+                    return False
+            
+        except Exception as e:
+            logger.error(f"Error installing from wheel: {e}")
+            return False
 
     def download_update(self) -> bool:
         """Download and install yt-dlp update"""
         with self.update_lock:
             try:
                 import httpx
-
+                
+                is_frozen = getattr(sys, 'frozen', False)
                 logger.info("Downloading yt-dlp update...")
 
-                # Download the wheel or source
+                # Get release info to find wheel
                 response = httpx.get(
-                    "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp",
+                    "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest",
                     timeout=30.0,
                     follow_redirects=True,
                 )
-
+                
                 if response.status_code != 200:
-                    logger.error(
-                        f"Failed to download update: HTTP {response.status_code}"
-                    )
+                    logger.error(f"Failed to fetch release info: {response.status_code}")
                     return False
+                    
+                data = response.json()
+                assets = data.get('assets', [])
+                wheel_asset = next((a for a in assets if a['name'].endswith('.whl')), None)
+                
+                # If frozen, we MUST use the wheel/custom path method
+                if is_frozen:
+                    if wheel_asset:
+                        logger.info("Frozen environment detected: Installing from wheel...")
+                        return self._install_from_wheel(wheel_asset['browser_download_url'])
+                    else:
+                        logger.error("No wheel asset found for frozen update")
+                        return False
 
-                # Save to temp file
-                temp_file = self.cache_dir / "yt-dlp_update"
-                with open(temp_file, "wb") as f:
-                    f.write(response.content)
-
-                # Verify download (basic check)
-                if temp_file.stat().st_size < 1000:
-                    logger.error("Downloaded file is too small, update failed")
-                    temp_file.unlink()
-                    return False
-
-                # Try to update via pip (works even in frozen environment)
+                # If not frozen, try pip first (standard behavior)
+                # But we need the binary URL for the old method? 
+                # Actually the old method downloaded the binary 'yt-dlp' file and then tried to pip install 'yt-dlp' from PyPI.
+                # That was weird. 'pip install yt-dlp' installs from PyPI, ignoring the downloaded file.
+                # Let's clean this up. If not frozen, just run pip install yt-dlp.
+                
                 try:
                     import subprocess
-
-                    # Use pip to install from the downloaded file
+                    logger.info("Attempting update via pip...")
                     result = subprocess.run(
                         [
                             sys.executable,
@@ -198,7 +252,6 @@ class YtDlpUpdater:
                             "pip",
                             "install",
                             "--upgrade",
-                            "--force-reinstall",
                             "yt-dlp",
                         ],
                         capture_output=True,
@@ -207,17 +260,16 @@ class YtDlpUpdater:
 
                     if result.returncode == 0:
                         logger.info("✅ yt-dlp updated successfully via pip")
-                        temp_file.unlink(missing_ok=True)
                         return True
                     else:
                         logger.warning(f"pip update failed: {result.stderr.decode()}")
-
                 except Exception as e:
                     logger.warning(f"pip update method failed: {e}")
 
-                # Fallback: try to replace the module directly (not recommended but works)
-                logger.info("Attempting direct module replacement...")
-                temp_file.unlink(missing_ok=True)
+                # Fallback to wheel installation even for non-frozen if pip fails
+                if wheel_asset:
+                    logger.info("Attempting direct module replacement from wheel...")
+                    return self._install_from_wheel(wheel_asset['browser_download_url'])
 
                 return False
 
