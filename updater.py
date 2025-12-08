@@ -4,13 +4,15 @@ yt-dlp Auto-Updater Module
 Handles automatic updates of yt-dlp without requiring system Python installation
 """
 
-import os
 import sys
+import os
 import json
 import shutil
 import logging
 import threading
 import tempfile
+import subprocess
+import time
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
@@ -327,6 +329,206 @@ class YtDlpUpdater:
 
         return False
 
+
+class AppUpdater:
+    """Manages full application updates via GitHub Releases"""
+    
+    REPO_OWNER = "paterkleomenis"
+    REPO_NAME = "Youtube-Downloader-Max-Quality"
+    
+    def __init__(self, current_version: str):
+        self.current_version = current_version
+        self.cache_dir = self._get_cache_dir()
+        self.update_lock = threading.Lock()
+        self.last_check_file = self.cache_dir / "app_last_check.txt"
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def _get_cache_dir(self) -> Path:
+        """Get platform-specific cache directory"""
+        if sys.platform == "win32":
+            base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+            cache_path = Path(base) / "youtube-downloader" / "app-update"
+        elif sys.platform == "darwin":
+            cache_path = Path.home() / "Library" / "Caches" / "youtube-downloader" / "app-update"
+        else:
+            base = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
+            cache_path = Path(base) / "youtube-downloader" / "app-update"
+        return cache_path
+
+    def check_for_updates(self) -> Tuple[bool, Optional[str], Optional[str]]:
+        """Check if app update is available"""
+        try:
+            import httpx
+            
+            # 1. Fetch latest release from GitHub
+            url = f"https://api.github.com/repos/{self.REPO_OWNER}/{self.REPO_NAME}/releases/latest"
+            response = httpx.get(url, timeout=5.0, follow_redirects=True)
+            
+            if response.status_code != 200:
+                logger.warning(f"Failed to check app updates: {response.status_code}")
+                return False, self.current_version, None
+                
+            data = response.json()
+            latest_tag = data.get("tag_name", "").lstrip("v")
+            
+            # 2. Compare versions
+            if self._compare_versions(self.current_version, latest_tag):
+                return True, self.current_version, latest_tag
+            
+            return False, self.current_version, latest_tag
+            
+        except Exception as e:
+            logger.error(f"Error checking app update: {e}")
+            return False, self.current_version, None
+
+    def _compare_versions(self, current: str, latest: str) -> bool:
+        """Simple semantic version comparison"""
+        try:
+            c_parts = [int(x) for x in current.split(".")]
+            l_parts = [int(x) for x in latest.split(".")]
+            
+            # Pad with zeros
+            max_len = max(len(c_parts), len(l_parts))
+            c_parts.extend([0] * (max_len - len(c_parts)))
+            l_parts.extend([0] * (max_len - len(l_parts)))
+            
+            return l_parts > c_parts
+        except Exception:
+            return False
+
+    def download_and_apply_update(self) -> bool:
+        """Download new binary and trigger swap process"""
+        try:
+            import httpx
+            
+            # 1. Identify correct asset for current platform
+            url = f"https://api.github.com/repos/{self.REPO_OWNER}/{self.REPO_NAME}/releases/latest"
+            data = httpx.get(url).json()
+            
+            assets = data.get("assets", [])
+            target_asset = None
+            
+            if sys.platform == "win32":
+                target_name = "youtube-downloader-windows-x64.exe"
+            elif sys.platform == "linux":
+                target_name = "youtube-downloader-linux-x64"
+            else:
+                return False # Unsupported for auto-update
+                
+            for asset in assets:
+                if asset["name"] == target_name:
+                    target_asset = asset
+                    break
+            
+            if not target_asset:
+                logger.error("No matching asset found for this platform")
+                return False
+                
+            # 2. Download new binary
+            download_url = target_asset["browser_download_url"]
+            logger.info(f"Downloading update from {download_url}...")
+            
+            # Determine where the current executable is
+            if getattr(sys, 'frozen', False):
+                current_exe = Path(sys.executable)
+            else:
+                # Development mode - cannot self-update
+                logger.info("Running in development mode, cannot self-update binary")
+                return False
+
+            new_exe = current_exe.with_suffix(".new")
+            
+            with httpx.stream("GET", download_url, follow_redirects=True) as r:
+                with open(new_exe, "wb") as f:
+                    for chunk in r.iter_bytes():
+                        f.write(chunk)
+            
+            # Make executable (Linux)
+            if sys.platform != "win32":
+                new_exe.chmod(0o755)
+                
+            # 3. Create Updater Script
+            self._trigger_swap(current_exe, new_exe)
+            return True
+            
+        except Exception as e:
+            logger.error(f"Update failed: {e}")
+            return False
+
+    def _trigger_swap(self, current_exe: Path, new_exe: Path):
+        """Launch separate script to swap files and restart"""
+        
+        # Platform specific updater script
+        if sys.platform == "win32":
+            script_content = f"""
+import time
+import os
+import sys
+import subprocess
+
+time.sleep(2) # Wait for main app to close
+try:
+    os.replace(r"{new_exe}", r"{current_exe}")
+    subprocess.Popen([r"{current_exe}"])
+except Exception as e:
+    print(f"Update failed: {{e}}")
+    time.sleep(5)
+"""
+            script_ext = ".py"
+            cmd = [sys.executable, "update_script.py"] # Use bundled python if possible or system? 
+            # Frozen apps on windows might not have python. 
+            # Better to use a .bat or .cmd for windows if no python available?
+            # Actually, typically we generate a .bat file for Windows.
+            
+            script_content = f"""
+@echo off
+timeout /t 2 /nobreak > NUL
+move /y "{new_exe}" "{current_exe}"
+start "" "{current_exe}"
+del "%~f0"
+"""
+            script_file = current_exe.parent / "update.bat"
+            with open(script_file, "w") as f:
+                f.write(script_content)
+                
+            subprocess.Popen([str(script_file)], shell=True, creationflags=subprocess.CREATE_NEW_CONSOLE)
+            
+        else: # Linux
+            script_content = f"""
+import time
+import os
+import sys
+import subprocess
+
+time.sleep(2)
+try:
+    os.rename("{new_exe}", "{current_exe}")
+    os.chmod("{current_exe}", 0o755)
+    subprocess.Popen(["{current_exe}"])
+except Exception as e:
+    print(e)
+"""
+            # On Linux, we can usually rely on python3 being present, or the bundled python?
+            # The frozen app contains a python runtime. We can try to use it to run a script?
+            # Or simpler: a shell script.
+            
+            sh_content = f"""#!/bin/sh
+sleep 2
+mv -f "{new_exe}" "{current_exe}"
+chmod +x "{current_exe}"
+"{current_exe}" &
+rm -- "$0"
+"""
+            script_file = current_exe.parent / "update.sh"
+            with open(script_file, "w") as f:
+                f.write(sh_content)
+            
+            os.chmod(script_file, 0o755)
+            subprocess.Popen(["/bin/sh", str(script_file)])
+
+        # Exit main app
+        logger.info("Update started, exiting...")
+        os._exit(0)
 
 # Global updater instance
 _updater_instance = None

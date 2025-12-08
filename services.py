@@ -15,8 +15,7 @@ from pathvalidate import sanitize_filename
 from yt_dlp import YoutubeDL
 
 from config import settings
-from models import DownloadStatusResponse, VideoInfoResponse, DownloadPrepareResponse
-
+from models import DownloadStatusResponse, VideoInfoResponse, DownloadPrepareResponse, ResolutionOption
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -199,9 +198,9 @@ class YoutubeDLService(DownloadService):
         if not info_dict:
             raise ValueError("Failed to extract video information")
 
-        # Extract available resolutions
+        # Extract available resolutions with Smart Tiering
         formats = info_dict.get('formats', []) or []
-        resolutions = []
+        raw_resolutions = set()
         estimated_sizes = {}
 
         for f in formats:
@@ -211,21 +210,67 @@ class YoutubeDLService(DownloadService):
                 filesize = f.get('filesize') or f.get('filesize_approx')
 
                 if height and ext == 'mp4' and height >= 144:
-                    resolutions.append(height)
+                    raw_resolutions.add(height)
                     if filesize:
                         estimated_sizes[height] = round(filesize / (1024 * 1024), 1)  # MB
 
-        resolutions = sorted(set(resolutions), reverse=True)
+        # Smart Tiering: Bucket "weird" heights into standard classes
+        # Standard targets: 144, 240, 360, 480, 720, 1080, 1440, 2160
+        # We map each raw height to the closest standard bin.
+        # If multiple raw heights map to the same bin, we keep the one closest to the bin (or larger).
+        
+        standard_bins = [144, 240, 360, 480, 720, 1080, 1440, 2160, 4320]
+        tiered_resolutions = {} # map bin -> best_actual_height
+
+        for h in raw_resolutions:
+            # Find closest bin
+            closest_bin = min(standard_bins, key=lambda x: abs(x - h))
+            
+            # Logic: If we already have a candidate for this bin, decide which to keep.
+            # Usually keeping the larger one is safer (more info), or the one closer to standard.
+            # Let's prefer the one strictly closer to the standard bin. 
+            # If tie, prefer higher.
+            
+            if closest_bin not in tiered_resolutions:
+                tiered_resolutions[closest_bin] = h
+            else:
+                current_best = tiered_resolutions[closest_bin]
+                # Compare distances
+                dist_current = abs(current_best - closest_bin)
+                dist_new = abs(h - closest_bin)
+                
+                if dist_new < dist_current:
+                    tiered_resolutions[closest_bin] = h
+                elif dist_new == dist_current:
+                    # If same distance (e.g. 1079 vs 1081), pick larger
+                    if h > current_best:
+                        tiered_resolutions[closest_bin] = h
+
+        resolutions_list = []
+        # sort by bin (quality) descending
+        for bin_key in sorted(tiered_resolutions.keys(), reverse=True):
+            actual_height = tiered_resolutions[bin_key]
+            
+            # Create label based on the BIN, not the actual height
+            # But handle 4K / 8K specially if you want "4K" text
+            label = f"{bin_key}p"
+            if bin_key == 4320: label = "8K"
+            elif bin_key == 2160: label = "4K"
+            elif bin_key == 1440: label = "2K"
+            
+            resolutions_list.append(ResolutionOption(label=label, value=actual_height))
 
         return VideoInfoResponse(
             title=info_dict.get('title') or 'Unknown Title',
             thumbnail=info_dict.get('thumbnail') or '',
-            resolutions=resolutions,
+            resolutions=resolutions_list,
             duration=info_dict.get('duration'),
             uploader=info_dict.get('uploader'),
             view_count=info_dict.get('view_count'),
             estimated_size=estimated_sizes
         )
+
+
 
     async def prepare_download(self, url: str, title: str, download_type: str,
                              resolution: Optional[int] = None, format_type: Optional[str] = None) -> DownloadPrepareResponse:

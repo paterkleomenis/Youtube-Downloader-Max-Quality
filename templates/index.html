@@ -1,222 +1,148 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Downloader - Max Quality</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="icon" type="image/png" href="/static/images/im.png">
+</head>
+<body>
+    <!-- Update Notification Bar -->
+    <div id="updateBar" class="update-bar hidden">
+        <span>New version available: <span id="newVersionBadge">v2.0.1</span></span>
+        <button id="triggerUpdateBtn" class="btn-sm primary-btn">Update Now</button>
+    </div>
 
-        <title>YouTube Video Downloader</title>
-        <link
-            rel="stylesheet"
-            href="{{ url_for('static', path='styles.css') }}"
-        />
-        <link
-            rel="icon"
-            href="{{ url_for('static', path='images/im2.png') }}"
-            type="image/png"
-        />
-    </head>
-    <body>
-        <div class="logo-container">
-            <img
-                src="{{ url_for('static', path='images/im2.png') }}"
-                alt="Site Logo"
-                class="site-logo"
-            />
-        </div>
+    <div class="app-container">
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Centered Logo -->
+            <div class="centered-logo">
+                <img src="/static/images/im.png" alt="Logo" class="main-logo-image">
+            </div>
 
-        <div style="position: fixed; top: 10px; right: 10px; z-index: 1000">
-            <button
-                onclick="checkForUpdates()"
-                id="updateButton"
-                style="
-                    padding: 6px 12px;
-                    background-color: rgba(245, 101, 101, 0.9);
-                    color: white;
-                    border: none;
-                    border-radius: 20px;
-                    cursor: pointer;
-                    font-size: 12px;
-                    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
-                    transition: all 0.3s ease;
-                "
-                onmouseover="this.style.backgroundColor='rgba(245, 101, 101, 1)'; this.style.transform='scale(1.05)'"
-                onmouseout="this.style.backgroundColor='rgba(245, 101, 101, 0.9)'; this.style.transform='scale(1)'"
-            >
-                🔄 Updates
-            </button>
-            <div
-                id="updateInfo"
-                style="
-                    margin-top: 5px;
-                    font-size: 11px;
-                    background: rgba(45, 45, 45, 0.98);
-                    padding: 8px;
-                    border-radius: 8px;
-                    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
-                    max-width: 200px;
-                    display: none;
-                    color: white;
-                "
-            ></div>
-        </div>
-
-        <div class="container">
-            <div class="info-container">
-                <div class="input-group">
-                    <input
-                        type="text"
-                        id="videoUrl"
-                        placeholder="Enter Video URL:"
-                        onkeydown="checkEnter(event)"
-                    />
-                    <button onclick="fetchVideoInfo()">Search</button>
-                </div>
-                <div id="loading" class="loading" style="display: none">
-                    <div class="spinner"></div>
-                    Loading...
-                </div>
-                <!-- Loading message -->
-                <div id="videoInfo">
-                    <h2 id="videoTitle"></h2>
-                    <div class="resolutions">
-                        <h3>Available Resolutions:</h3>
-                        <ul id="resolutionList"></ul>
+            <!-- Search Section -->
+            <section class="search-section">
+                <div class="input-group glass-panel">
+                    <input type="text" id="urlInput" placeholder="Paste YouTube Link Here..." autocomplete="off">
+                    <button id="fetchBtn" class="primary-btn">
+                        <i class="fa-solid fa-magnifying-glass"></i> Analyze
+                    </button>
+                    <!-- Mode Switch for Simple/Advanced Options -->
+                    <div class="mode-switch-wrapper" title="Toggle Advanced Mode">
+                        <span class="switch-label">Simple</span>
+                        <label class="switch">
+                            <input type="checkbox" id="modeToggle">
+                            <span class="slider round"></span>
+                        </label>
+                        <span class="switch-label">Advanced</span>
                     </div>
-                    <div id="audioDownload" style="display: none">
-                        <!-- Initially hidden -->
-                        <h3>Download Audio:</h3>
-                        <button onclick="downloadAudioFormat('webm')">
-                            Default (WEBM)
-                        </button>
-                        <button onclick="downloadAudioFormat('mp3')">
-                            MP3
-                        </button>
-                        <button onclick="downloadAudioFormat('ogg')">
-                            OGG
-                        </button>
-                        <button onclick="downloadAudioFormat('aac')">
-                            AAC
-                        </button>
-                        <button onclick="downloadAudioFormat('wav')">
-                            WAV
-                        </button>
-                        <button onclick="downloadAudioFormat('flac')">
-                            FLAC
-                        </button>
-                        <button onclick="downloadAudioFormat('m4a')">
-                            M4A
-                        </button>
+                </div>
+            </section>
+
+            <!-- Video Info & Options (Hidden initially) -->
+            <section id="videoInfoSection" class="video-info-section hidden">
+                <div class="video-card glass-panel">
+                    <div class="video-thumbnail">
+                        <img id="thumbnailImg" src="" alt="Video Thumbnail">
+                        <span class="duration-badge" id="videoDuration">00:00</span>
                     </div>
-                    <div
-                        id="progressWrapper"
-                        class="progress-wrapper"
-                        style="display: none"
-                    >
-                        <!-- Hide by default -->
-                        <div class="progress-bar">
-                            <div
-                                id="progress"
-                                class="progress"
-                                style="width: 0%"
-                            ></div>
+                    <div class="video-details">
+                        <h2 id="videoTitle" class="video-title">Video Title</h2>
+                        <p id="videoChannel" class="channel-name">Channel Name</p>
+                        
+                        <!-- Simple Mode Options -->
+                        <div id="simpleOptions" class="download-options">
+                            <div class="option-group">
+                                <label>Format:</label>
+                                <div class="format-buttons">
+                                    <button class="format-btn active" data-type="video">Video</button>
+                                    <button class="format-btn" data-type="audio">Audio</button>
+                                </div>
+                            </div>
+                            
+                            <div class="option-group" id="qualityGroup">
+                                <label>Quality:</label>
+                                <select id="simpleQualitySelect" class="styled-select">
+                                    <!-- Populated by JS -->
+                                </select>
+                            </div>
+                            
+                            <div class="option-group hidden" id="audioFormatGroup">
+                                <label>Audio Format:</label>
+                                <select id="audioFormatSelect" class="styled-select">
+                                    <option value="mp3">MP3 (Universal)</option>
+                                    <option value="m4a">M4A (Best Quality)</option>
+                                    <option value="wav">WAV (Lossless)</option>
+                                </select>
+                            </div>
                         </div>
-                        <div id="progressText" class="progress-text"></div>
+
+                        <!-- Advanced Mode Options -->
+                        <div id="advancedOptions" class="download-options hidden">
+                            <div class="table-container">
+                                <table class="formats-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Ext</th>
+                                            <th>Resolution</th>
+                                            <th>Codec</th>
+                                            <th>Size (Est)</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="formatsTableBody">
+                                        <!-- Populated by JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="action-area" id="mainActionArea">
+                            <button id="downloadBtn" class="download-btn">
+                                <i class="fa-solid fa-download"></i> Start Download
+                            </button>
+                        </div>
                     </div>
                 </div>
+            </section>
+
+            <!-- Active Downloads Queue -->
+            <section id="downloadsSection" class="downloads-section hidden">
+                <h3>Active Downloads</h3>
+                <div id="downloadsList" class="downloads-list">
+                    <!-- Download Cards injected here -->
+                </div>
+            </section>
+        </main>
+
+
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content glass-panel">
+            <span class="close-modal">&times;</span>
+            <h2>Settings</h2>
+            <div class="setting-item">
+                <label>Theme</label>
+                <select id="themeSelect">
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                </select>
             </div>
-            <div class="thumbnail-container">
-                <img
-                    id="thumbnail"
-                    class="thumbnail"
-                    src=""
-                    alt="Video Thumbnail"
-                    style="display: none"
-                />
+            <!-- More settings can go here -->
+             <div class="setting-item">
+                <button id="checkUpdatesBtn" class="secondary-btn">Check for Updates</button>
             </div>
         </div>
+    </div>
 
-        <script src="{{ url_for('static', path='script.js') }}"></script>
-        <script>
-            async function checkForUpdates() {
-                const updateButton = document.getElementById("updateButton");
-                const updateInfo = document.getElementById("updateInfo");
+    <!-- Toast Container -->
+    <div id="toastContainer" class="toast-container"></div>
 
-                updateButton.disabled = true;
-                updateButton.textContent = "⏳";
-                updateInfo.style.display = "block";
-                updateInfo.innerHTML =
-                    '<span style="color: #ccc;">Checking...</span>';
-
-                try {
-                    const response = await fetch("/api/check_updates");
-                    const data = await response.json();
-
-                    if (data.update_available) {
-                        updateInfo.style.display = "block";
-                        updateInfo.innerHTML = `
-                            <div style="color: #ff9800; font-weight: bold;">Update available!</div>
-                            <div style="font-size: 10px; color: #ccc; margin: 3px 0;">${data.current_version} → ${data.latest_version}</div>
-                            <button onclick="installUpdate()" style="padding: 4px 10px; background-color: #f56565; color: white; border: none; border-radius: 12px; cursor: pointer; font-size: 11px; width: 100%;">
-                                Install
-                            </button>
-                        `;
-                    } else if (data.current_version) {
-                        updateInfo.style.display = "block";
-                        updateInfo.innerHTML = `<span style="color: #4CAF50;">✅ Up to date<br><small style="color: #ccc;">${data.current_version}</small></span>`;
-                        setTimeout(() => {
-                            updateInfo.style.display = "none";
-                        }, 3000);
-                    } else {
-                        updateInfo.style.display = "block";
-                        updateInfo.innerHTML = `<span style="color: #ccc;">Check failed</span>`;
-                        setTimeout(() => {
-                            updateInfo.style.display = "none";
-                        }, 3000);
-                    }
-                } catch (error) {
-                    updateInfo.style.display = "block";
-                    updateInfo.innerHTML = `<span style="color: #f44336;">Error</span>`;
-                    setTimeout(() => {
-                        updateInfo.style.display = "none";
-                    }, 3000);
-                    console.error("Update check failed:", error);
-                } finally {
-                    updateButton.disabled = false;
-                    updateButton.textContent = "🔄 Updates";
-                }
-            }
-
-            async function installUpdate() {
-                const updateInfo = document.getElementById("updateInfo");
-                updateInfo.style.display = "block";
-                updateInfo.innerHTML =
-                    '<span style="color: #ccc;">Installing...</span>';
-
-                try {
-                    const response = await fetch("/api/update_ytdlp", {
-                        method: "POST",
-                    });
-                    const data = await response.json();
-
-                    if (data.success) {
-                        updateInfo.innerHTML = `<span style="color: #4CAF50;">✅ Updated!<br><small>${data.new_version}</small></span>`;
-                        setTimeout(() => {
-                            updateInfo.style.display = "none";
-                        }, 5000);
-                    } else {
-                        updateInfo.innerHTML = `<span style="color: #f44336;">❌ Failed<br><small>${data.message}</small></span>`;
-                        setTimeout(() => {
-                            updateInfo.style.display = "none";
-                        }, 5000);
-                    }
-                } catch (error) {
-                    updateInfo.innerHTML = `<span style="color: #f44336;">Install error</span>`;
-                    setTimeout(() => {
-                        updateInfo.style.display = "none";
-                    }, 3000);
-                    console.error("Update installation failed:", error);
-                }
-            }
-        </script>
-    </body>
+    <script src="/static/script.js"></script>
+</body>
 </html>

@@ -29,9 +29,13 @@ from models import (
     ErrorResponse,
 )
 from services import DownloadService, get_download_service
-from updater import get_updater
+from updater import get_updater, AppUpdater
 
-# Configure logging
+# ...
+
+
+
+# ... existing endpoints ...
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -358,6 +362,24 @@ async def get_config():
     }
 
 
+@app.get("/api/version")
+async def get_versions():
+    """Get application and yt-dlp versions"""
+    try:
+        updater_instance = get_updater()
+        ytdlp_version = updater_instance.get_current_version()
+        return {
+            "app_version": app.version,
+            "ytdlp_version": ytdlp_version if ytdlp_version else "N/A"
+        }
+    except Exception as e:
+        logger.error(f"Error fetching versions: {e}")
+        return {
+            "app_version": app.version,
+            "ytdlp_version": "Unknown"
+        }
+
+
 @app.get("/api/check_updates")
 async def check_updates():
     """Check for yt-dlp updates"""
@@ -382,6 +404,37 @@ async def check_updates():
             "status": "error",
             "error": str(e),
         }
+
+
+@app.get("/api/app_update_status")
+async def check_app_updates():
+    """Check for main application updates"""
+    try:
+        updater = AppUpdater(app.version)
+        available, current, latest = updater.check_for_updates()
+        return {
+            "update_available": available,
+            "current_version": current,
+            "latest_version": latest
+        }
+    except Exception as e:
+        logger.error(f"Error checking app updates: {e}")
+        return {"update_available": False, "error": str(e)}
+
+
+@app.post("/api/apply_app_update")
+async def apply_app_update():
+    """Trigger the update process"""
+    try:
+        updater = AppUpdater(app.version)
+        success = updater.download_and_apply_update()
+        if success:
+            return {"status": "updating", "message": "Application is restarting..."}
+        else:
+            raise HTTPException(status_code=500, detail="Update failed to start")
+    except Exception as e:
+        logger.error(f"Update error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/update_ytdlp")

@@ -1,5 +1,5 @@
+from typing import List, Optional, Dict, Literal
 from pydantic import BaseModel, HttpUrl, validator, Field
-from typing import Optional, Literal, List
 import re
 from urllib.parse import urlparse
 from config import settings
@@ -60,8 +60,7 @@ class DownloadRequest(BaseModel):
         if values.get('type') == 'video':
             if v is None:
                 raise ValueError('Resolution is required for video downloads')
-            if v not in settings.allowed_resolutions:
-                raise ValueError(f'Invalid resolution. Allowed: {settings.allowed_resolutions}')
+            # Removed strict list check to allow non-standard resolutions (like 816p)
         return v
 
     @validator('format')
@@ -84,19 +83,29 @@ class DownloadStatusResponse(BaseModel):
     download_speed: Optional[str] = None  # e.g., "1.2 MB/s"
     file_size: Optional[str] = None  # e.g., "45.6 MB"
 
+class ResolutionOption(BaseModel):
+    label: str
+    value: int
+
 class VideoInfoResponse(BaseModel):
     title: str
     thumbnail: str
-    resolutions: List[int]
-    duration: Optional[int] = None  # seconds
+    resolutions: List[ResolutionOption]
+    duration: Optional[int] = None
     uploader: Optional[str] = None
     view_count: Optional[int] = None
-    estimated_size: Optional[dict] = None  # resolution -> estimated size in MB
+    estimated_size: Optional[Dict[int, float]] = None
 
 class DownloadPrepareResponse(BaseModel):
     download_id: str
     estimated_size_mb: Optional[float] = None
     estimated_duration_seconds: Optional[int] = None
+
+class DownloadResponse(BaseModel):
+    status: str
+    message: str
+    file_path: Optional[str] = None
+    download_id: Optional[str] = None  # Added for frontend tracking
 
 class ErrorResponse(BaseModel):
     error: str
