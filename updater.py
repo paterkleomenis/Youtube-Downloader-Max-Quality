@@ -516,6 +516,7 @@ except Exception as e:
 sleep 2
 mv -f "{new_exe}" "{current_exe}"
 chmod +x "{current_exe}"
+unset LD_LIBRARY_PATH
 "{current_exe}" &
 rm -- "$0"
 """
