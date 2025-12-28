@@ -312,7 +312,6 @@ async def download_file(
             filename=filename,
             headers={
                 "Cache-Control": "no-cache",
-                "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
             },
         )
 
