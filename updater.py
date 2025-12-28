@@ -473,12 +473,13 @@ class AppUpdater:
         # Platform specific updater script
         if sys.platform == "win32":
             # Windows batch script with retry loop
+            # Using ping for delay as it's more reliable than timeout in non-interactive sessions
             script_content = f"""
 @echo off
 set "RETRIES=0"
 :loop
-timeout /t 1 /nobreak > NUL
-move /y "{new_exe}" "{current_exe}" > NUL 2>&1
+ping 127.0.0.1 -n 2 > nul
+move /y "{new_exe}" "{current_exe}" > nul 2>&1
 if errorlevel 1 (
     set /a "RETRIES+=1"
     if %RETRIES% LSS 30 goto loop
@@ -490,19 +491,17 @@ del "%~f0"
             with open(script_file, "w") as f:
                 f.write(script_content)
 
-            subprocess.Popen(
-                [str(script_file)],
-                shell=True,
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
-            )
+            # Use Popen with creationflags to detach correctly
+            # CREATE_NEW_CONSOLE = 0x00000010
+            subprocess.Popen(f'"{script_file}"', shell=True, creationflags=0x00000010)
 
         else:  # Linux
             # Linux shell script with retry loop
             sh_content = f"""#!/bin/sh
-# Wait for the main process to exit
-sleep 2
+# Wait for main process
+sleep 3
 
-# Retry loop for moving the file
+# Retry loop
 RETRIES=0
 while [ $RETRIES -lt 30 ]; do
     mv -f "{new_exe}" "{current_exe}" > /dev/null 2>&1
@@ -515,7 +514,7 @@ done
 
 chmod +x "{current_exe}"
 unset LD_LIBRARY_PATH
-"{current_exe}" &
+nohup "{current_exe}" > /dev/null 2>&1 &
 rm -- "$0"
 """
             script_file = current_exe.parent / "update.sh"
@@ -524,18 +523,21 @@ rm -- "$0"
 
             os.chmod(script_file, 0o755)
 
-            # Prepare clean environment to avoid library conflicts with PyInstaller
+            # Prepare clean environment
             env = os.environ.copy()
             env.pop("LD_LIBRARY_PATH", None)
 
-            # Use setsid to detach completely if possible, otherwise standard background
+            # Use nohup to ensure survival
             subprocess.Popen(
-                ["/bin/sh", str(script_file)], env=env, start_new_session=True
+                f'nohup /bin/sh "{script_file}" > /dev/null 2>&1 &',
+                shell=True,
+                env=env,
+                preexec_fn=os.setsid,
             )
 
         # Schedule exit in a separate thread to allow API response to return
         def delayed_exit():
-            time.sleep(1.0)
+            time.sleep(2.0)
             logger.info("Update started, exiting...")
             os._exit(0)
 
