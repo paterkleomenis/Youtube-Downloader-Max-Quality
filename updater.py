@@ -4,19 +4,19 @@ yt-dlp Auto-Updater Module
 Handles automatic updates of yt-dlp without requiring system Python installation
 """
 
-import sys
-import os
-import json
-import shutil
-import logging
-import threading
-import tempfile
-import subprocess
-import time
-from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Optional, Tuple
 import hashlib
+import json
+import logging
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class YtDlpUpdater:
             cache_path = Path(base) / "youtube-downloader" / "yt-dlp"
 
         return cache_path
-    
+
     def get_lib_dir(self) -> Path:
         """Get directory where custom library updates are stored"""
         return self.cache_dir / "lib"
@@ -159,48 +159,49 @@ class YtDlpUpdater:
         except Exception as e:
             logger.error(f"Error comparing versions: {e}")
             return False
-            
+
     def _install_from_wheel(self, url: str) -> bool:
         """Download and install yt-dlp from wheel"""
         try:
-            import httpx
-            import zipfile
             import io
-            
+            import zipfile
+
+            import httpx
+
             logger.info(f"Downloading yt-dlp wheel from {url}")
-            
+
             response = httpx.get(url, follow_redirects=True, timeout=60.0)
             if response.status_code != 200:
                 logger.error(f"Failed to download wheel: {response.status_code}")
                 return False
-                
+
             # Extract to lib dir
             lib_dir = self.get_lib_dir()
-            
+
             # Create a temp directory for extraction
             with tempfile.TemporaryDirectory() as temp_extract_dir:
                 with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref:
                     zip_ref.extractall(temp_extract_dir)
-                
+
                 # Move yt_dlp folder to lib_dir
                 source_yt_dlp = Path(temp_extract_dir) / "yt_dlp"
                 dest_yt_dlp = lib_dir / "yt_dlp"
-                
+
                 if source_yt_dlp.exists():
                     if dest_yt_dlp.exists():
                         shutil.rmtree(dest_yt_dlp)
                     lib_dir.mkdir(parents=True, exist_ok=True)
                     shutil.move(str(source_yt_dlp), str(dest_yt_dlp))
-                    
-                    # Also copy .dist-info if possible to preserve version info, 
+
+                    # Also copy .dist-info if possible to preserve version info,
                     # but just the package is enough for functionality
-                    
+
                     logger.info(f"Successfully installed yt-dlp to {lib_dir}")
                     return True
                 else:
                     logger.error("yt_dlp package not found in wheel")
                     return False
-            
+
         except Exception as e:
             logger.error(f"Error installing from wheel: {e}")
             return False
@@ -210,8 +211,8 @@ class YtDlpUpdater:
         with self.update_lock:
             try:
                 import httpx
-                
-                is_frozen = getattr(sys, 'frozen', False)
+
+                is_frozen = getattr(sys, "frozen", False)
                 logger.info("Downloading yt-dlp update...")
 
                 # Get release info to find wheel
@@ -220,32 +221,41 @@ class YtDlpUpdater:
                     timeout=30.0,
                     follow_redirects=True,
                 )
-                
+
                 if response.status_code != 200:
-                    logger.error(f"Failed to fetch release info: {response.status_code}")
+                    logger.error(
+                        f"Failed to fetch release info: {response.status_code}"
+                    )
                     return False
-                    
+
                 data = response.json()
-                assets = data.get('assets', [])
-                wheel_asset = next((a for a in assets if a['name'].endswith('.whl')), None)
-                
+                assets = data.get("assets", [])
+                wheel_asset = next(
+                    (a for a in assets if a["name"].endswith(".whl")), None
+                )
+
                 # If frozen, we MUST use the wheel/custom path method
                 if is_frozen:
                     if wheel_asset:
-                        logger.info("Frozen environment detected: Installing from wheel...")
-                        return self._install_from_wheel(wheel_asset['browser_download_url'])
+                        logger.info(
+                            "Frozen environment detected: Installing from wheel..."
+                        )
+                        return self._install_from_wheel(
+                            wheel_asset["browser_download_url"]
+                        )
                     else:
                         logger.error("No wheel asset found for frozen update")
                         return False
 
                 # If not frozen, try pip first (standard behavior)
-                # But we need the binary URL for the old method? 
+                # But we need the binary URL for the old method?
                 # Actually the old method downloaded the binary 'yt-dlp' file and then tried to pip install 'yt-dlp' from PyPI.
                 # That was weird. 'pip install yt-dlp' installs from PyPI, ignoring the downloaded file.
                 # Let's clean this up. If not frozen, just run pip install yt-dlp.
-                
+
                 try:
                     import subprocess
+
                     logger.info("Attempting update via pip...")
                     result = subprocess.run(
                         [
@@ -271,7 +281,7 @@ class YtDlpUpdater:
                 # Fallback to wheel installation even for non-frozen if pip fails
                 if wheel_asset:
                     logger.info("Attempting direct module replacement from wheel...")
-                    return self._install_from_wheel(wheel_asset['browser_download_url'])
+                    return self._install_from_wheel(wheel_asset["browser_download_url"])
 
                 return False
 
@@ -332,10 +342,10 @@ class YtDlpUpdater:
 
 class AppUpdater:
     """Manages full application updates via GitHub Releases"""
-    
+
     REPO_OWNER = "paterkleomenis"
     REPO_NAME = "Youtube-Downloader-Max-Quality"
-    
+
     def __init__(self, current_version: str):
         self.current_version = current_version
         self.cache_dir = self._get_cache_dir()
@@ -349,7 +359,9 @@ class AppUpdater:
             base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
             cache_path = Path(base) / "youtube-downloader" / "app-update"
         elif sys.platform == "darwin":
-            cache_path = Path.home() / "Library" / "Caches" / "youtube-downloader" / "app-update"
+            cache_path = (
+                Path.home() / "Library" / "Caches" / "youtube-downloader" / "app-update"
+            )
         else:
             base = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
             cache_path = Path(base) / "youtube-downloader" / "app-update"
@@ -359,24 +371,24 @@ class AppUpdater:
         """Check if app update is available"""
         try:
             import httpx
-            
+
             # 1. Fetch latest release from GitHub
             url = f"https://api.github.com/repos/{self.REPO_OWNER}/{self.REPO_NAME}/releases/latest"
             response = httpx.get(url, timeout=5.0, follow_redirects=True)
-            
+
             if response.status_code != 200:
                 logger.warning(f"Failed to check app updates: {response.status_code}")
                 return False, self.current_version, None
-                
+
             data = response.json()
             latest_tag = data.get("tag_name", "").lstrip("v")
-            
+
             # 2. Compare versions
             if self._compare_versions(self.current_version, latest_tag):
                 return True, self.current_version, latest_tag
-            
+
             return False, self.current_version, latest_tag
-            
+
         except Exception as e:
             logger.error(f"Error checking app update: {e}")
             return False, self.current_version, None
@@ -386,12 +398,12 @@ class AppUpdater:
         try:
             c_parts = [int(x) for x in current.split(".")]
             l_parts = [int(x) for x in latest.split(".")]
-            
+
             # Pad with zeros
             max_len = max(len(c_parts), len(l_parts))
             c_parts.extend([0] * (max_len - len(c_parts)))
             l_parts.extend([0] * (max_len - len(l_parts)))
-            
+
             return l_parts > c_parts
         except Exception:
             return False
@@ -400,36 +412,36 @@ class AppUpdater:
         """Download new binary and trigger swap process"""
         try:
             import httpx
-            
+
             # 1. Identify correct asset for current platform
             url = f"https://api.github.com/repos/{self.REPO_OWNER}/{self.REPO_NAME}/releases/latest"
             data = httpx.get(url).json()
-            
+
             assets = data.get("assets", [])
             target_asset = None
-            
+
             if sys.platform == "win32":
                 target_name = "youtube-downloader-windows-x64.exe"
             elif sys.platform == "linux":
                 target_name = "youtube-downloader-linux-x64"
             else:
-                return False # Unsupported for auto-update
-                
+                return False  # Unsupported for auto-update
+
             for asset in assets:
                 if asset["name"] == target_name:
                     target_asset = asset
                     break
-            
+
             if not target_asset:
                 logger.error("No matching asset found for this platform")
                 return False
-                
+
             # 2. Download new binary
             download_url = target_asset["browser_download_url"]
             logger.info(f"Downloading update from {download_url}...")
-            
+
             # Determine where the current executable is
-            if getattr(sys, 'frozen', False):
+            if getattr(sys, "frozen", False):
                 current_exe = Path(sys.executable)
             else:
                 # Development mode - cannot self-update
@@ -437,84 +449,70 @@ class AppUpdater:
                 return False
 
             new_exe = current_exe.with_suffix(".new")
-            
+
             with httpx.stream("GET", download_url, follow_redirects=True) as r:
                 with open(new_exe, "wb") as f:
                     for chunk in r.iter_bytes():
                         f.write(chunk)
-            
+
             # Make executable (Linux)
             if sys.platform != "win32":
                 new_exe.chmod(0o755)
-                
+
             # 3. Create Updater Script
             self._trigger_swap(current_exe, new_exe)
             return True
-            
+
         except Exception as e:
             logger.error(f"Update failed: {e}")
             return False
 
     def _trigger_swap(self, current_exe: Path, new_exe: Path):
         """Launch separate script to swap files and restart"""
-        
+
         # Platform specific updater script
         if sys.platform == "win32":
-            script_content = f"""
-import time
-import os
-import sys
-import subprocess
-
-time.sleep(2) # Wait for main app to close
-try:
-    os.replace(r"{new_exe}", r"{current_exe}")
-    subprocess.Popen([r"{current_exe}"])
-except Exception as e:
-    print(f"Update failed: {{e}}")
-    time.sleep(5)
-"""
-            script_ext = ".py"
-            cmd = [sys.executable, "update_script.py"] # Use bundled python if possible or system? 
-            # Frozen apps on windows might not have python. 
-            # Better to use a .bat or .cmd for windows if no python available?
-            # Actually, typically we generate a .bat file for Windows.
-            
+            # Windows batch script with retry loop
             script_content = f"""
 @echo off
-timeout /t 2 /nobreak > NUL
-move /y "{new_exe}" "{current_exe}"
+set "RETRIES=0"
+:loop
+timeout /t 1 /nobreak > NUL
+move /y "{new_exe}" "{current_exe}" > NUL 2>&1
+if errorlevel 1 (
+    set /a "RETRIES+=1"
+    if %RETRIES% LSS 30 goto loop
+)
 start "" "{current_exe}"
 del "%~f0"
 """
             script_file = current_exe.parent / "update.bat"
             with open(script_file, "w") as f:
                 f.write(script_content)
-                
-            subprocess.Popen([str(script_file)], shell=True, creationflags=subprocess.CREATE_NEW_CONSOLE)
-            
-        else: # Linux
-            script_content = f"""
-import time
-import os
-import sys
-import subprocess
 
-time.sleep(2)
-try:
-    os.rename("{new_exe}", "{current_exe}")
-    os.chmod("{current_exe}", 0o755)
-    subprocess.Popen(["{current_exe}"])
-except Exception as e:
-    print(e)
-"""
-            # On Linux, we can usually rely on python3 being present, or the bundled python?
-            # The frozen app contains a python runtime. We can try to use it to run a script?
-            # Or simpler: a shell script.
-            
+            subprocess.Popen(
+                [str(script_file)],
+                shell=True,
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+            )
+
+        else:  # Linux
+            # Linux shell script with retry loop
             sh_content = f"""#!/bin/sh
+# Wait for the main process to exit
 sleep 2
-mv -f "{new_exe}" "{current_exe}"
+
+# Retry loop for moving the file
+RETRIES=0
+while [ $RETRIES -lt 30 ]; do
+    mv -f "{new_exe}" "{current_exe}" > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        break
+    fi
+    sleep 1
+    RETRIES=$((RETRIES+1))
+done
+
 chmod +x "{current_exe}"
 unset LD_LIBRARY_PATH
 "{current_exe}" &
@@ -523,18 +521,26 @@ rm -- "$0"
             script_file = current_exe.parent / "update.sh"
             with open(script_file, "w") as f:
                 f.write(sh_content)
-            
+
             os.chmod(script_file, 0o755)
-            
+
             # Prepare clean environment to avoid library conflicts with PyInstaller
             env = os.environ.copy()
-            env.pop('LD_LIBRARY_PATH', None)
-            
-            subprocess.Popen(["/bin/sh", str(script_file)], env=env)
+            env.pop("LD_LIBRARY_PATH", None)
 
-        # Exit main app
-        logger.info("Update started, exiting...")
-        os._exit(0)
+            # Use setsid to detach completely if possible, otherwise standard background
+            subprocess.Popen(
+                ["/bin/sh", str(script_file)], env=env, start_new_session=True
+            )
+
+        # Schedule exit in a separate thread to allow API response to return
+        def delayed_exit():
+            time.sleep(1.0)
+            logger.info("Update started, exiting...")
+            os._exit(0)
+
+        threading.Thread(target=delayed_exit, daemon=True).start()
+
 
 # Global updater instance
 _updater_instance = None

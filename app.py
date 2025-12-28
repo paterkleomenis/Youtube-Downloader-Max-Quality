@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="YouTube Video/Audio Downloader",
     description="Download videos and audio from YouTube with progress tracking",
-    version="2.0.5",
+    version="2.0.6",
 )
 
 # Initialize rate limiter if available
