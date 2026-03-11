@@ -1,28 +1,82 @@
 import asyncio
+import atexit
+import importlib
+import logging
 import os
-import tempfile
 import shutil
 import subprocess
+import sys
+import tempfile
 import threading
 import time
 import uuid
-import atexit
-import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Union, cast
+
+import yt_dlp
 from pathvalidate import sanitize_filename
 from yt_dlp import YoutubeDL
 
 from config import settings
-from models import DownloadStatusResponse, VideoInfoResponse, DownloadPrepareResponse, ResolutionOption
+from models import (
+    DownloadPrepareResponse,
+    DownloadStatusResponse,
+    ResolutionOption,
+    VideoInfoResponse,
+)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+def _reload_ytdlp():
+    """
+    Reload the yt_dlp package after an on-disk update so that the running
+    process picks up the new code without a restart.
+    """
+    global yt_dlp, YoutubeDL
+    try:
+        if "yt_dlp" in sys.modules:
+            # Module still in sys.modules — use importlib.reload()
+            yt_dlp = importlib.reload(sys.modules["yt_dlp"])
+        else:
+            # Module was already purged (e.g. by updater.reload_yt_dlp()) — fresh import
+            import yt_dlp as _fresh  # noqa: F811
+
+            yt_dlp = _fresh
+
+        # Re-bind YoutubeDL so every subsequent call in this file uses the new code
+        YoutubeDL = yt_dlp.YoutubeDL
+        logger.info(
+            f"yt_dlp module reloaded successfully — version {yt_dlp.version.__version__}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to reload yt_dlp module: {e}")
+
+
+def _try_update_and_reload(error_message: str) -> bool:
+    """
+    If *error_message* looks like an outdated-yt-dlp problem, download the
+    latest release, install it, and hot-reload the module.
+
+    Returns True when an update was applied (caller should retry the
+    operation), False otherwise.
+    """
+    from updater import get_updater
+
+    updater = get_updater()
+    updated = updater.try_update_on_error(error_message)
+    if updated:
+        _reload_ytdlp()
+    return updated
+
+
 # Global fast progress tracking
 global_progress = 0
 progress_lock = threading.Lock()
+
 
 class DownloadTask:
     def __init__(self, download_id: str, url: str, title: str, download_type: str):
@@ -47,7 +101,13 @@ class DownloadTask:
             global_progress = progress
         self.progress = progress
 
-    def update_progress(self, progress: float, speed: Optional[str] = None, eta: Optional[int] = None, file_size: Optional[str] = None):
+    def update_progress(
+        self,
+        progress: float,
+        speed: Optional[str] = None,
+        eta: Optional[int] = None,
+        file_size: Optional[str] = None,
+    ):
         self.progress = progress
         self.download_speed = speed
         self.estimated_time_remaining = eta
@@ -64,7 +124,10 @@ class DownloadTask:
         self.error = error
 
     def is_expired(self) -> bool:
-        return datetime.now() - self.created_at > timedelta(hours=settings.task_expiry_hours)
+        return datetime.now() - self.created_at > timedelta(
+            hours=settings.task_expiry_hours
+        )
+
 
 class DownloadService(ABC):
     @abstractmethod
@@ -72,8 +135,14 @@ class DownloadService(ABC):
         pass
 
     @abstractmethod
-    async def prepare_download(self, url: str, title: str, download_type: str,
-                             resolution: Optional[int] = None, format_type: Optional[str] = None) -> DownloadPrepareResponse:
+    async def prepare_download(
+        self,
+        url: str,
+        title: str,
+        download_type: str,
+        resolution: Optional[int] = None,
+        format_type: Optional[str] = None,
+    ) -> DownloadPrepareResponse:
         pass
 
     @abstractmethod
@@ -83,6 +152,7 @@ class DownloadService(ABC):
     @abstractmethod
     def get_file_path(self, download_id: str) -> Optional[str]:
         pass
+
 
 class YoutubeDLService(DownloadService):
     def __init__(self):
@@ -99,6 +169,7 @@ class YoutubeDLService(DownloadService):
 
     def _start_cleanup_scheduler(self):
         """Start background cleanup scheduler"""
+
         def cleanup_worker():
             while True:
                 try:
@@ -115,7 +186,8 @@ class YoutubeDLService(DownloadService):
         """Remove expired tasks and their files"""
         with self.tasks_lock:
             expired_tasks = [
-                task_id for task_id, task in self.download_tasks.items()
+                task_id
+                for task_id, task in self.download_tasks.items()
                 if task.is_expired()
             ]
 
@@ -159,21 +231,22 @@ class YoutubeDLService(DownloadService):
     async def get_video_info(self, url: str) -> VideoInfoResponse:
         """Extract video information without downloading"""
         ydl_opts = {
-            'quiet': True,
-            'skip_download': True,
-            'format': 'bestaudio/best',
-            'noplaylist': True,
-            'socket_timeout': 30,
-            'retries': 3,
-            'fragment_retries': 3,
-            'extractor_retries': 3,
-            'file_access_retries': 3,
-            'force_ipv4': True,
+            "quiet": True,
+            "skip_download": True,
+            "format": "bestaudio/best",
+            "noplaylist": True,
+            "socket_timeout": 30,
+            "retries": 3,
+            "fragment_retries": 3,
+            "extractor_retries": 3,
+            "file_access_retries": 3,
+            "force_ipv4": True,
         }
 
         def extract_info():
             max_retries = 3
             retry_delay = 2
+            did_update = False
 
             for attempt in range(max_retries):
                 try:
@@ -181,15 +254,34 @@ class YoutubeDLService(DownloadService):
                         return ydl.extract_info(url, download=False)
                 except Exception as e:
                     error_msg = str(e).lower()
-                    if "temporary failure in name resolution" in error_msg or "transport error" in error_msg:
+                    # Transient network errors → simple retry with back-off
+                    if (
+                        "temporary failure in name resolution" in error_msg
+                        or "transport error" in error_msg
+                    ):
                         if attempt < max_retries - 1:
-                            logger.warning(f"Network error on attempt {attempt + 1}, retrying in {retry_delay}s: {e}")
+                            logger.warning(
+                                f"Network error on attempt {attempt + 1}, retrying in {retry_delay}s: {e}"
+                            )
                             time.sleep(retry_delay)
-                            retry_delay *= 2  # Exponential backoff
+                            retry_delay *= 2
                             continue
+
+                    # Extraction / extractor errors → try updating yt-dlp once, then retry
+                    if not did_update:
+                        logger.warning(
+                            f"Extract failed ({e}), attempting yt-dlp update…"
+                        )
+                        if _try_update_and_reload(str(e)):
+                            did_update = True
+                            logger.info("yt-dlp updated, retrying extraction…")
+                            continue  # retry with the freshly loaded module
+
                     raise ValueError(f"Failed to extract video information: {str(e)}")
 
-            raise ValueError("Failed to extract video information after multiple attempts")
+            raise ValueError(
+                "Failed to extract video information after multiple attempts"
+            )
 
         # Run in thread pool to avoid blocking
         loop = asyncio.get_event_loop()
@@ -199,38 +291,40 @@ class YoutubeDLService(DownloadService):
             raise ValueError("Failed to extract video information")
 
         # Extract available resolutions with Smart Tiering
-        formats = info_dict.get('formats', []) or []
+        formats = info_dict.get("formats", []) or []
         raw_resolutions = set()
         estimated_sizes = {}
 
         for f in formats:
             if f and isinstance(f, dict):
-                height = f.get('height')
-                ext = f.get('ext')
-                filesize = f.get('filesize') or f.get('filesize_approx')
+                height = f.get("height")
+                ext = f.get("ext")
+                filesize = f.get("filesize") or f.get("filesize_approx")
 
-                if height and ext == 'mp4' and height >= 144:
+                if height and ext == "mp4" and height >= 144:
                     raw_resolutions.add(height)
                     if filesize:
-                        estimated_sizes[height] = round(filesize / (1024 * 1024), 1)  # MB
+                        estimated_sizes[height] = round(
+                            filesize / (1024 * 1024), 1
+                        )  # MB
 
         # Smart Tiering: Bucket "weird" heights into standard classes
         # Standard targets: 144, 240, 360, 480, 720, 1080, 1440, 2160
         # We map each raw height to the closest standard bin.
         # If multiple raw heights map to the same bin, we keep the one closest to the bin (or larger).
-        
+
         standard_bins = [144, 240, 360, 480, 720, 1080, 1440, 2160, 4320]
-        tiered_resolutions = {} # map bin -> best_actual_height
+        tiered_resolutions = {}  # map bin -> best_actual_height
 
         for h in raw_resolutions:
             # Find closest bin
             closest_bin = min(standard_bins, key=lambda x: abs(x - h))
-            
+
             # Logic: If we already have a candidate for this bin, decide which to keep.
             # Usually keeping the larger one is safer (more info), or the one closer to standard.
-            # Let's prefer the one strictly closer to the standard bin. 
+            # Let's prefer the one strictly closer to the standard bin.
             # If tie, prefer higher.
-            
+
             if closest_bin not in tiered_resolutions:
                 tiered_resolutions[closest_bin] = h
             else:
@@ -238,7 +332,7 @@ class YoutubeDLService(DownloadService):
                 # Compare distances
                 dist_current = abs(current_best - closest_bin)
                 dist_new = abs(h - closest_bin)
-                
+
                 if dist_new < dist_current:
                     tiered_resolutions[closest_bin] = h
                 elif dist_new == dist_current:
@@ -250,30 +344,37 @@ class YoutubeDLService(DownloadService):
         # sort by bin (quality) descending
         for bin_key in sorted(tiered_resolutions.keys(), reverse=True):
             actual_height = tiered_resolutions[bin_key]
-            
+
             # Create label based on the BIN, not the actual height
             # But handle 4K / 8K specially if you want "4K" text
             label = f"{bin_key}p"
-            if bin_key == 4320: label = "8K"
-            elif bin_key == 2160: label = "4K"
-            elif bin_key == 1440: label = "2K"
-            
+            if bin_key == 4320:
+                label = "8K"
+            elif bin_key == 2160:
+                label = "4K"
+            elif bin_key == 1440:
+                label = "2K"
+
             resolutions_list.append(ResolutionOption(label=label, value=actual_height))
 
         return VideoInfoResponse(
-            title=info_dict.get('title') or 'Unknown Title',
-            thumbnail=info_dict.get('thumbnail') or '',
+            title=info_dict.get("title") or "Unknown Title",
+            thumbnail=info_dict.get("thumbnail") or "",
             resolutions=resolutions_list,
-            duration=info_dict.get('duration'),
-            uploader=info_dict.get('uploader'),
-            view_count=info_dict.get('view_count'),
-            estimated_size=estimated_sizes
+            duration=info_dict.get("duration"),
+            uploader=info_dict.get("uploader"),
+            view_count=info_dict.get("view_count"),
+            estimated_size=estimated_sizes,
         )
 
-
-
-    async def prepare_download(self, url: str, title: str, download_type: str,
-                             resolution: Optional[int] = None, format_type: Optional[str] = None) -> DownloadPrepareResponse:
+    async def prepare_download(
+        self,
+        url: str,
+        title: str,
+        download_type: str,
+        resolution: Optional[int] = None,
+        format_type: Optional[str] = None,
+    ) -> DownloadPrepareResponse:
         """Prepare a download task"""
         download_id = str(uuid.uuid4())
 
@@ -288,13 +389,13 @@ class YoutubeDLService(DownloadService):
             threading.Thread(
                 target=self._background_video_download,
                 args=(download_id, url, title, resolution),
-                daemon=True
+                daemon=True,
             ).start()
         elif download_type == "audio":
             threading.Thread(
                 target=self._background_audio_download,
                 args=(download_id, url, title, format_type),
-                daemon=True
+                daemon=True,
             ).start()
 
         # Estimate download parameters
@@ -313,7 +414,7 @@ class YoutubeDLService(DownloadService):
         return DownloadPrepareResponse(
             download_id=download_id,
             estimated_size_mb=estimated_size,
-            estimated_duration_seconds=estimated_duration
+            estimated_duration_seconds=estimated_duration,
         )
 
     def get_download_status(self, download_id: str) -> Optional[DownloadStatusResponse]:
@@ -332,7 +433,7 @@ class YoutubeDLService(DownloadService):
                 error=task.error,
                 estimated_time_remaining=task.estimated_time_remaining,
                 download_speed=task.download_speed,
-                file_size=task.file_size
+                file_size=task.file_size,
             )
 
     def get_file_path(self, download_id: str) -> Optional[str]:
@@ -345,17 +446,20 @@ class YoutubeDLService(DownloadService):
 
     def _create_progress_hook(self, download_id: str, is_audio: bool = False):
         """Create a progress hook for yt-dlp"""
+
         def progress_hook(d):
-            if d['status'] == 'downloading':
-                total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
-                downloaded_bytes = d.get('downloaded_bytes', 0)
-                speed = d.get('speed')
-                eta = d.get('eta')
+            if d["status"] == "downloading":
+                total_bytes = d.get("total_bytes") or d.get("total_bytes_estimate")
+                downloaded_bytes = d.get("downloaded_bytes", 0)
+                speed = d.get("speed")
+                eta = d.get("eta")
 
                 if total_bytes:
                     # For audio, downloading is 50% of total progress due to conversion
                     progress_multiplier = 0.5 if is_audio else 1.0
-                    progress = (downloaded_bytes / total_bytes) * 100 * progress_multiplier
+                    progress = (
+                        (downloaded_bytes / total_bytes) * 100 * progress_multiplier
+                    )
 
                     speed_str = None
                     if speed:
@@ -377,36 +481,41 @@ class YoutubeDLService(DownloadService):
                                 progress, speed_str, eta, file_size_str
                             )
                             # Update global progress for fast access
-                            self.download_tasks[download_id].update_global_progress(progress)
+                            self.download_tasks[download_id].update_global_progress(
+                                progress
+                            )
 
         return progress_hook
 
-    def _background_video_download(self, download_id: str, url: str, title: str, resolution: int):
+    def _background_video_download(
+        self, download_id: str, url: str, title: str, resolution: int
+    ):
         """Background video download function"""
         try:
             task = self.download_tasks[download_id]
             temp_dir = tempfile.mkdtemp(prefix="yt_dl_", dir=settings.temp_dir)
             task.temp_dir = temp_dir
 
-            temp_file_path = os.path.join(temp_dir, 'temp_video.mp4')
+            temp_file_path = os.path.join(temp_dir, "temp_video.mp4")
 
             ydl_opts = {
-                'outtmpl': temp_file_path,
-                'format': f'bestvideo[ext=mp4][height={resolution}]+bestaudio/best[ext=mp4][height={resolution}]',
-                'merge_output_format': 'mp4',
-                'noplaylist': True,
-                'progress_hooks': [self._create_progress_hook(download_id)],
-                'quiet': True,
-                'socket_timeout': 30,
-                'retries': 3,
-                'fragment_retries': 3,
-                'extractor_retries': 3,
-                'file_access_retries': 3,
-                'force_ipv4': True,
+                "outtmpl": temp_file_path,
+                "format": f"bestvideo[ext=mp4][height={resolution}]+bestaudio/best[ext=mp4][height={resolution}]",
+                "merge_output_format": "mp4",
+                "noplaylist": True,
+                "progress_hooks": [self._create_progress_hook(download_id)],
+                "quiet": True,
+                "socket_timeout": 30,
+                "retries": 3,
+                "fragment_retries": 3,
+                "extractor_retries": 3,
+                "file_access_retries": 3,
+                "force_ipv4": True,
             }
 
-            # Add retry logic for downloads
+            # Add retry logic for downloads (with auto-update on extractor errors)
             max_retries = 3
+            did_update = False
             for attempt in range(max_retries):
                 try:
                     with YoutubeDL(ydl_opts) as ydl:
@@ -414,20 +523,38 @@ class YoutubeDLService(DownloadService):
                     break  # Success, exit retry loop
                 except Exception as e:
                     error_msg = str(e).lower()
-                    if ("temporary failure" in error_msg or "transport error" in error_msg) and attempt < max_retries - 1:
-                        logger.warning(f"Video download attempt {attempt + 1} failed, retrying: {e}")
-                        time.sleep(2 * (attempt + 1))  # Progressive delay
+                    # Transient network errors → simple retry
+                    if (
+                        "temporary failure" in error_msg
+                        or "transport error" in error_msg
+                    ) and attempt < max_retries - 1:
+                        logger.warning(
+                            f"Video download attempt {attempt + 1} failed, retrying: {e}"
+                        )
+                        time.sleep(2 * (attempt + 1))
                         continue
-                    else:
-                        raise  # Re-raise if not a network error or max retries exceeded
+
+                    # Extraction / format errors → try a yt-dlp update once
+                    if not did_update:
+                        logger.warning(
+                            f"Video download failed ({e}), attempting yt-dlp update…"
+                        )
+                        if _try_update_and_reload(str(e)):
+                            did_update = True
+                            logger.info("yt-dlp updated, retrying video download…")
+                            continue
+
+                    raise  # Re-raise if nothing helped
 
             # Find the downloaded file
-            downloaded_files = [f for f in os.listdir(temp_dir) if f.endswith('.mp4')]
+            downloaded_files = [f for f in os.listdir(temp_dir) if f.endswith(".mp4")]
             if not downloaded_files:
                 raise Exception("No video file found after download")
 
             temp_file = os.path.join(temp_dir, downloaded_files[0])
-            final_file_path = os.path.join(temp_dir, f'{sanitize_filename(title)}_{resolution}p.mp4')
+            final_file_path = os.path.join(
+                temp_dir, f"{sanitize_filename(title)}_{resolution}p.mp4"
+            )
             os.rename(temp_file, final_file_path)
 
             with self.tasks_lock:
@@ -440,32 +567,39 @@ class YoutubeDLService(DownloadService):
                 if download_id in self.download_tasks:
                     self.download_tasks[download_id].set_error(str(e))
 
-    def _background_audio_download(self, download_id: str, url: str, title: str, format_type: str):
+    def _background_audio_download(
+        self, download_id: str, url: str, title: str, format_type: str
+    ):
         """Background audio download function"""
         try:
             task = self.download_tasks[download_id]
             temp_dir = tempfile.mkdtemp(prefix="yt_dl_", dir=settings.temp_dir)
             task.temp_dir = temp_dir
 
-            temp_file_path = os.path.join(temp_dir, 'temp_audio.webm')
-            final_file_path = os.path.join(temp_dir, f'{sanitize_filename(title)}.{format_type}')
+            temp_file_path = os.path.join(temp_dir, "temp_audio.webm")
+            final_file_path = os.path.join(
+                temp_dir, f"{sanitize_filename(title)}.{format_type}"
+            )
 
             ydl_opts = {
-                'outtmpl': temp_file_path,
-                'format': 'bestaudio/best',
-                'noplaylist': True,
-                'progress_hooks': [self._create_progress_hook(download_id, is_audio=True)],
-                'quiet': True,
-                'socket_timeout': 30,
-                'retries': 3,
-                'fragment_retries': 3,
-                'extractor_retries': 3,
-                'file_access_retries': 3,
-                'force_ipv4': True,
+                "outtmpl": temp_file_path,
+                "format": "bestaudio/best",
+                "noplaylist": True,
+                "progress_hooks": [
+                    self._create_progress_hook(download_id, is_audio=True)
+                ],
+                "quiet": True,
+                "socket_timeout": 30,
+                "retries": 3,
+                "fragment_retries": 3,
+                "extractor_retries": 3,
+                "file_access_retries": 3,
+                "force_ipv4": True,
             }
 
-            # Add retry logic for audio downloads
+            # Add retry logic for audio downloads (with auto-update on extractor errors)
             max_retries = 3
+            did_update = False
             for attempt in range(max_retries):
                 try:
                     with YoutubeDL(ydl_opts) as ydl:
@@ -473,17 +607,35 @@ class YoutubeDLService(DownloadService):
                     break  # Success, exit retry loop
                 except Exception as e:
                     error_msg = str(e).lower()
-                    if ("temporary failure" in error_msg or "transport error" in error_msg) and attempt < max_retries - 1:
-                        logger.warning(f"Audio download attempt {attempt + 1} failed, retrying: {e}")
-                        time.sleep(2 * (attempt + 1))  # Progressive delay
+                    # Transient network errors → simple retry
+                    if (
+                        "temporary failure" in error_msg
+                        or "transport error" in error_msg
+                    ) and attempt < max_retries - 1:
+                        logger.warning(
+                            f"Audio download attempt {attempt + 1} failed, retrying: {e}"
+                        )
+                        time.sleep(2 * (attempt + 1))
                         continue
-                    else:
-                        raise  # Re-raise if not a network error or max retries exceeded
+
+                    # Extraction / format errors → try a yt-dlp update once
+                    if not did_update:
+                        logger.warning(
+                            f"Audio download failed ({e}), attempting yt-dlp update…"
+                        )
+                        if _try_update_and_reload(str(e)):
+                            did_update = True
+                            logger.info("yt-dlp updated, retrying audio download…")
+                            continue
+
+                    raise  # Re-raise if nothing helped
 
             # Use the downloaded file
             if not os.path.exists(temp_file_path):
                 # Find any downloaded file
-                downloaded_files = [f for f in os.listdir(temp_dir) if not f.endswith('.part')]
+                downloaded_files = [
+                    f for f in os.listdir(temp_dir) if not f.endswith(".part")
+                ]
                 if not downloaded_files:
                     raise Exception("No audio file found after download")
                 temp_file = os.path.join(temp_dir, downloaded_files[0])
@@ -497,14 +649,14 @@ class YoutubeDLService(DownloadService):
                     self.download_tasks[download_id].update_global_progress(50.0)
 
             # Convert to desired format if needed
-            if format_type == 'webm' or temp_file.endswith(f'.{format_type}'):
+            if format_type == "webm" or temp_file.endswith(f".{format_type}"):
                 os.rename(temp_file, final_file_path)
             else:
                 # Convert using ffmpeg
-                ffmpeg_command = [settings.ffmpeg_path, '-i', temp_file]
+                ffmpeg_command = [settings.ffmpeg_path, "-i", temp_file]
                 codec_args = self._get_ffmpeg_codec_args(format_type)
                 ffmpeg_command.extend(codec_args)
-                ffmpeg_command.extend(['-y', final_file_path])  # -y to overwrite
+                ffmpeg_command.extend(["-y", final_file_path])  # -y to overwrite
 
                 subprocess.run(ffmpeg_command, check=True, capture_output=True)
                 os.remove(temp_file)
@@ -522,17 +674,19 @@ class YoutubeDLService(DownloadService):
     def _get_ffmpeg_codec_args(self, format_type: str):
         """Helper function to get ffmpeg codec arguments"""
         codec_map = {
-            'mp3': ['-codec:a', 'libmp3lame', '-b:a', '320k'],
-            'ogg': ['-codec:a', 'libvorbis', '-q:a', '10'],
-            'aac': ['-codec:a', 'aac', '-b:a', '320k'],
-            'wav': ['-codec:a', 'pcm_s16le'],
-            'flac': ['-codec:a', 'flac'],
-            'm4a': ['-codec:a', 'aac', '-b:a', '320k']
+            "mp3": ["-codec:a", "libmp3lame", "-b:a", "320k"],
+            "ogg": ["-codec:a", "libvorbis", "-q:a", "10"],
+            "aac": ["-codec:a", "aac", "-b:a", "320k"],
+            "wav": ["-codec:a", "pcm_s16le"],
+            "flac": ["-codec:a", "flac"],
+            "m4a": ["-codec:a", "aac", "-b:a", "320k"],
         }
         return codec_map.get(format_type, [])
 
+
 # Global service instance
 _download_service = None
+
 
 def get_download_service() -> DownloadService:
     """Dependency injection function for FastAPI"""
@@ -540,6 +694,7 @@ def get_download_service() -> DownloadService:
     if _download_service is None:
         _download_service = YoutubeDLService()
     return _download_service
+
 
 def get_global_progress() -> float:
     """Get the current global progress"""

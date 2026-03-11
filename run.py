@@ -4,13 +4,14 @@ YouTube Downloader - Startup Script
 Run this script to start the application with proper configuration.
 """
 
-import os
-import sys
-import subprocess
 import logging
+import os
 import socket
+import subprocess
+import sys
 from pathlib import Path
-from updater import check_updates_on_startup, get_updater
+
+from updater import force_update_ytdlp_sync, get_updater
 
 # Add the project directory to Python path
 project_dir = Path(__file__).parent
@@ -26,8 +27,9 @@ except Exception:
 
 try:
     import uvicorn
-    from config import settings
+
     from app import app
+    from config import settings
 except ImportError as e:
     print(f"Error importing dependencies: {e}")
     print("Please install requirements: pip install -r requirements.txt")
@@ -126,9 +128,19 @@ def main():
     # Setup logging
     setup_logging()
 
-    # Check for yt-dlp updates in background
-    print("🔄 Checking for updates...")
-    check_updates_on_startup()
+    # Force yt-dlp update check on every startup (synchronous, so we're always current)
+    print("🔄 Checking for yt-dlp updates (this may take a moment)...")
+    updated = force_update_ytdlp_sync()
+    if updated:
+        # services.py was already imported (via app.py) with the OLD yt_dlp
+        # bindings.  We must re-bind its module-level YoutubeDL so that all
+        # downloads use the freshly installed version.
+        from services import _reload_ytdlp
+
+        _reload_ytdlp()
+        print("✅ yt-dlp has been updated to the latest version!")
+    else:
+        print("✅ yt-dlp is up to date.")
 
     # Check dependencies
     check_dependencies()

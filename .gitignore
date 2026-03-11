@@ -1,6 +1,92 @@
+# =========================
+# Python
+# =========================
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+*.manifest
+*.spec.swp
+
+# =========================
+# Virtual Environments
+# =========================
 venv/
-.ropeproject/
-*.log
+env/
+.venv/
 .env
+
+# =========================
+# PyInstaller Build
+# =========================
+build/
+dist/
+pyi_runtime_hook.py
+
+# =========================
+# FFmpeg binaries (downloaded during CI build)
+# =========================
+ffmpeg_bin/
+ffmpeg.zip
+ffmpeg-*.tar.xz
+ffmpeg-*-amd64-static/
+ffmpeg-*-essentials_build/
+ffprobe.zip
+
+# =========================
+# IDE / Editor
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.ropeproject/
+
+# =========================
+# Testing / Type Checking
+# =========================
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# =========================
+# Logs
+# =========================
+*.log
+youtube_downloader.log
+
+# =========================
+# OS Generated
+# =========================
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# =========================
+# Temp / Runtime
+# =========================
 /tmp/
+*.tmp
+*.bak
+
+# =========================
+# Auto-updater generated scripts
+# =========================
+update.sh
+update.bat
+*.new
+
+# =========================
+# Distribution / Packaging
+# =========================
+*.whl
+*.tar.gz
+*.zip
+MANIFEST

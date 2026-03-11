@@ -53,7 +53,7 @@ class YtDlpUpdater:
         return self.cache_dir / "lib"
 
     def _should_check_update(self) -> bool:
-        """Check if we should check for updates (once per day)"""
+        """Check if we should check for updates (once every 6 hours)"""
         if not self.last_check_file.exists():
             return True
 
@@ -62,8 +62,8 @@ class YtDlpUpdater:
                 last_check_str = f.read().strip()
                 last_check = datetime.fromisoformat(last_check_str)
 
-            # Check if more than 24 hours have passed
-            return datetime.now() - last_check > timedelta(hours=24)
+            # Check if more than 6 hours have passed
+            return datetime.now() - last_check > timedelta(hours=6)
         except Exception as e:
             logger.error(f"Error reading last check time: {e}")
             return True
@@ -311,12 +311,38 @@ class YtDlpUpdater:
         thread = threading.Thread(target=_update, daemon=True)
         thread.start()
 
-    def try_update_on_error(self, error_message: str) -> bool:
+    def update_blocking(self, force: bool = True) -> bool:
         """
-        Try to update yt-dlp if error suggests it's outdated
+        Run a synchronous (blocking) update check + install.
+        Called on startup so the app always has the latest yt-dlp.
 
         Returns:
-            True if update was attempted, False otherwise
+            True if an update was applied, False otherwise.
+        """
+        try:
+            update_available, current, latest = self.check_for_updates(force=force)
+            if update_available:
+                logger.info(f"yt-dlp update available: {current} -> {latest}")
+                success = self.download_update()
+                if success:
+                    logger.info(f"✅ yt-dlp updated to {latest}")
+                    reload_yt_dlp()
+                    return True
+                else:
+                    logger.warning("yt-dlp update download failed")
+            else:
+                logger.info(f"yt-dlp is up to date ({current})")
+        except Exception as e:
+            logger.error(f"Blocking update check failed: {e}")
+        return False
+
+    def try_update_on_error(self, error_message: str) -> bool:
+        """
+        Try to update yt-dlp if error suggests it's outdated.
+        After a successful update the yt_dlp module is reloaded in-process.
+
+        Returns:
+            True if an update was applied successfully, False otherwise.
         """
         # Error patterns that suggest yt-dlp is outdated
         outdated_patterns = [
@@ -326,6 +352,17 @@ class YtDlpUpdater:
             "signature extraction failed",
             "unable to download webpage",
             "requested format not available",
+            "unable to download api",
+            "got error",
+            "http error 403",
+            "http error 429",
+            "this video is unavailable",
+            "private video",
+            "sign in to confirm",
+            "urlopen error",
+            "incomplete read",
+            "content too short",
+            "giving up after",
         ]
 
         error_lower = error_message.lower()
@@ -333,9 +370,12 @@ class YtDlpUpdater:
         # Check if error matches outdated patterns
         if any(pattern in error_lower for pattern in outdated_patterns):
             logger.warning(
-                "Download error suggests outdated yt-dlp, attempting update..."
+                "Download error suggests outdated yt-dlp, attempting force update..."
             )
-            return self.download_update()
+            success = self.download_update()
+            if success:
+                reload_yt_dlp()
+                return True
 
         return False
 
@@ -556,7 +596,72 @@ def get_updater() -> YtDlpUpdater:
     return _updater_instance
 
 
-def check_updates_on_startup():
-    """Run update check on application startup"""
+def reload_yt_dlp():
+    """
+    Reload the yt_dlp package after an on-disk update so the running
+    process picks up the new code without a restart.
+    """
+    try:
+        import yt_dlp
+
+        # Collect every loaded yt_dlp sub-module so we can purge them
+        to_remove = [
+            key for key in sys.modules if key == "yt_dlp" or key.startswith("yt_dlp.")
+        ]
+        for key in to_remove:
+            del sys.modules[key]
+
+        # Re-import so subsequent `from yt_dlp import YoutubeDL` gets the new code
+        import yt_dlp as _reloaded  # noqa: F811
+
+        logger.info(
+            f"yt_dlp reloaded — now running version {_reloaded.version.__version__}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to reload yt_dlp module: {e}")
+
+
+def force_update_ytdlp_sync() -> bool:
+    """
+    Convenience wrapper used by run.py to force a synchronous yt-dlp
+    update check + install on every application launch.
+
+    Returns:
+        True if an update was applied, False otherwise.
+    """
     updater = get_updater()
-    updater.update_in_background()
+
+    # Ensure lib_dir is on sys.path so updated packages are found
+    lib_dir = updater.get_lib_dir()
+    lib_dir_str = str(lib_dir)
+    if lib_dir_str not in sys.path:
+        sys.path.insert(0, lib_dir_str)
+
+    try:
+        return updater.update_blocking(force=True)
+    except Exception as e:
+        logger.warning(f"force_update_ytdlp_sync failed: {e}")
+        return False
+
+
+def check_updates_on_startup():
+    """
+    Run a **blocking** update check on application startup so that the
+    executable always launches with the latest yt-dlp.  Falls back to a
+    background check if the blocking call takes too long or errors out.
+    """
+    updater = get_updater()
+
+    # Ensure lib_dir is on sys.path so updated packages are found
+    lib_dir = updater.get_lib_dir()
+    lib_dir_str = str(lib_dir)
+    if lib_dir_str not in sys.path:
+        sys.path.insert(0, lib_dir_str)
+
+    try:
+        updater.update_blocking(force=True)
+    except Exception as e:
+        logger.warning(
+            f"Blocking startup update failed ({e}), falling back to background check"
+        )
+        updater.update_in_background()
